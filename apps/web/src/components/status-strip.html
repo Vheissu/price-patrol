@@ -1,0 +1,7 @@
+<template>
+<div class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm" style="border-color: var(--border-subtle); background: var(--surface);">
+  <span class.bind="badgeClass">${state}</span>
+  <span class="font-medium">${title}</span>
+  <span if.bind="detail" class="text-xs muted-copy">&middot; ${detail}</span>
+</div>
+</template>

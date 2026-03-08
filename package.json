@@ -1,0 +1,28 @@
+{
+  "name": "price-patrol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @price-patrol/core && npm run build -w @price-patrol/cli && npm run build -w @price-patrol/api && npm run build -w @price-patrol/mcp && npm run build -w @price-patrol/web",
+    "dev:api": "npm run dev -w @price-patrol/api",
+    "dev:mcp": "npm run dev -w @price-patrol/mcp",
+    "dev:web": "npm run dev -w @price-patrol/web",
+    "dev": "tsx scripts/dev.ts",
+    "setup": "tsx packages/cli/src/index.js setup",
+    "config:show": "tsx packages/cli/src/index.js config show",
+    "test": "npm run test -w @price-patrol/core",
+    "lint": "npm run lint -ws --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.2",
+    "tsx": "^4.20.6",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,35 @@
+<template>
+<div>
+  <div if.bind="isLoading" class="text-sm muted-copy">Loading explanation&#x2026;</div>
+  <div if.bind="error" class="error-box">${error}</div>
+
+  <div if.bind="explanation" class="space-y-4">
+    <p class="text-sm leading-relaxed muted-copy">${explanation.summary}</p>
+
+    <div if.bind="explanation.reasons.length">
+      <p class="eyebrow mb-2">Reasons</p>
+      <ul class="space-y-1.5">
+        <li repeat.for="reason of explanation.reasons" class="list-bullet">${reason}</li>
+      </ul>
+    </div>
+
+    <div if.bind="explanation.rankingFactors.length">
+      <p class="eyebrow mb-2">Ranking factors</p>
+      <ul class="space-y-1.5">
+        <li repeat.for="factor of explanation.rankingFactors" class="list-bullet">${factor}</li>
+      </ul>
+    </div>
+
+    <div if.bind="explanation.exclusions.length">
+      <p class="eyebrow mb-2">Excluded</p>
+      <ul class="space-y-1.5">
+        <li repeat.for="reason of explanation.exclusions" class="list-bullet">${reason}</li>
+      </ul>
+    </div>
+  </div>
+
+  <div if.bind="!isLoading && !error && !explanation" class="text-sm muted-copy">
+    Run a comparison to see the explanation.
+  </div>
+</div>
+</template>

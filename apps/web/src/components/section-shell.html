@@ -1,0 +1,9 @@
+<template>
+<section class="surface-panel px-5 py-5 sm:px-6">
+  <div if.bind="heading" class="mb-4">
+    <p if.bind="subheading" class="eyebrow">${subheading}</p>
+    <h2 class="mt-1 font-display text-2xl leading-tight">${heading}</h2>
+  </div>
+  <au-slot></au-slot>
+</section>
+</template>

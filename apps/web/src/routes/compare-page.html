@@ -1,0 +1,127 @@
+<template>
+<div class="compare-layout">
+  <section>
+    <form class="flex flex-col gap-3" submit.trigger="handleSubmit($event)">
+      <div class="search-bar">
+        <input value.bind="query" class="search-input" placeholder="What are you looking for? e.g. full cream milk 2L" />
+        <button class="search-button" disabled.bind="isSubmitting">
+          ${isSubmitting ? 'Comparing\u2026' : 'Compare'}
+        </button>
+      </div>
+      <div class="search-options">
+        <div class="option-group">
+          <span class="option-label">Location</span>
+          <input value.bind="postcode" class="option-input" placeholder="4101" />
+          <input value.bind="suburb" class="option-input" placeholder="West End" />
+        </div>
+        <div class="option-group">
+          <span class="option-label">Mode</span>
+          <select value.bind="mode" class="option-input">
+            <option repeat.for="modeOption of modes" model.bind="modeOption">${modeOption}</option>
+          </select>
+        </div>
+      </div>
+    </form>
+    <div if.bind="error" class="error-box mt-3">${error}</div>
+  </section>
+
+  <div if.bind="result" class="flex flex-col gap-6 animate-in">
+    <section if.bind="result.recommended" class="flex flex-col gap-3">
+      <p class="section-label">Best price found</p>
+      <recommendation-card card.bind="result.recommended" highlight.bind="true" heading="Recommended"></recommendation-card>
+
+      <div class="hero-actions">
+        <button class="compact-btn" disabled.bind="isSavingFavorite" click.trigger="saveFavorite()">
+          &#9825; ${isSavingFavorite ? 'Saving\u2026' : 'Favorite'}
+        </button>
+        <button class="compact-btn" disabled.bind="isSavingCorrection" click.trigger="saveMatchPreference()">
+          &#10003; ${isSavingCorrection ? 'Saving\u2026' : 'Prefer this'}
+        </button>
+        <div class="watch-group">
+          <input value.bind="targetPriceText" class="watch-input" placeholder="Target $" />
+          <button class="compact-btn" disabled.bind="isSavingWatchlist" click.trigger="saveWatchlist()">
+            ${isSavingWatchlist ? '\u2026' : 'Watch'}
+          </button>
+        </div>
+      </div>
+      <p if.bind="favoriteMessage" class="feedback-msg">${favoriteMessage}</p>
+      <p if.bind="correctionMessage" class="feedback-msg">${correctionMessage}</p>
+      <p if.bind="watchlistMessage" class="feedback-msg">${watchlistMessage}</p>
+    </section>
+
+    <section if.bind="result.alternatives.length">
+      <p class="section-label">Also available &middot; ${result.alternatives.length} options</p>
+      <div class="alternatives-grid">
+        <button repeat.for="card of result.alternatives" class="text-left" click.trigger="selectCard(card)">
+          <recommendation-card card.bind="card" highlight.bind="selectedCard === card"></recommendation-card>
+        </button>
+      </div>
+    </section>
+
+    <div if.bind="selectedCard?.priceIntelligence" class="flex flex-col">
+      <button class="collapsible-trigger" click.trigger="showPriceIntel = !showPriceIntel">
+        Price intelligence
+        <span class="collapsible-chevron" class.open.bind="showPriceIntel">&#x203A;</span>
+      </button>
+      <div if.bind="showPriceIntel" class="collapsible-content">
+        <div class="intel-grid">
+          <p class="intel-stat"><strong>${selectedCard.priceIntelligence.seenCount}</strong> times seen</p>
+          <p class="intel-stat">Median <strong>$${selectedCard.priceIntelligence.medianSeenPrice.toFixed(2)}</strong></p>
+          <p class="intel-stat">Low <strong>$${selectedCard.priceIntelligence.lowestSeenPrice.toFixed(2)}</strong></p>
+          <p if.bind="selectedCard.priceIntelligence.dropVsMedianPct != null" class="intel-stat">
+            <strong>${Math.round(selectedCard.priceIntelligence.dropVsMedianPct * 100)}%</strong> below median
+          </p>
+        </div>
+        <div if.bind="history.length" class="mt-4">
+          <p class="eyebrow mb-2">Recent price history</p>
+          <div repeat.for="point of recentHistory" class="history-row">
+            <span>${new Date(point.observedAt).toLocaleString()}</span>
+            <span>${point.retailer} &middot; $${point.effectivePrice.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex flex-col">
+      <button class="collapsible-trigger" click.trigger="showExplanation = !showExplanation">
+        Why this was recommended
+        <span class="collapsible-chevron" class.open.bind="showExplanation">&#x203A;</span>
+      </button>
+      <div if.bind="showExplanation" class="collapsible-content">
+        <explanation-panel
+          explanation.bind="explanation"
+          is-loading.bind="isExplanationLoading"
+          error.bind="explanationError"
+        ></explanation-panel>
+      </div>
+    </div>
+
+    <div if.bind="result.notes.length" class="flex flex-col">
+      <button class="collapsible-trigger" click.trigger="showNotes = !showNotes">
+        Notes &amp; warnings &middot; ${result.notes.length}
+        <span class="collapsible-chevron" class.open.bind="showNotes">&#x203A;</span>
+      </button>
+      <div if.bind="showNotes" class="collapsible-content space-y-3">
+        <div repeat.for="note of result.notes" class="soft-panel">
+          <p class="eyebrow">${note.kind}</p>
+          <p class="mt-1 text-sm muted-copy">${note.message}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="status-row">
+      <status-strip
+        title="Last refreshed"
+        state.bind="recommendedFreshnessState"
+        detail.bind="comparedAtLabel"
+      ></status-strip>
+      <status-strip
+        repeat.for="source of result.retailerHealth"
+        title.bind="source.retailer"
+        state.bind="source.status"
+        detail.bind="source.detail || source.lastSuccessAt"
+      ></status-strip>
+    </div>
+  </div>
+</div>
+</template>

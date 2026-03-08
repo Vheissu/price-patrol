@@ -1,0 +1,21 @@
+<template>
+<div class="min-h-screen" style="background: var(--bg); color: var(--ink);">
+  <header class="top-bar">
+    <div class="top-bar__inner">
+      <div class="top-bar__brand">
+        <h1 class="font-display text-xl font-bold tracking-tight" style="color: var(--primary)">Price Patrol</h1>
+        <span class="top-bar__tagline hidden sm:inline">Grocery price radar</span>
+      </div>
+      <nav class="top-bar__nav" aria-label="Primary">
+        <a repeat.for="item of navigation" class="top-bar__link" load.bind="item.route">
+          ${item.label}
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <au-viewport></au-viewport>
+  </main>
+</div>
+</template>

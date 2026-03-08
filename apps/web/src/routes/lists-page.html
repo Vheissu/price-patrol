@@ -1,0 +1,160 @@
+<template>
+<div class="layout-lists grid gap-6">
+  <div class="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+    <section-shell
+      heading="Saved lists"
+      subheading="Reusable baskets"
+      aside="Keep separate plans for weekly essentials, baking supplies, or school lunches. The list form stays intentionally plain so you can edit quickly."
+    >
+      <form class="grid gap-4" submit.trigger="handleSaveSubmit($event)">
+        <label class="field-shell">
+          <span class="field-label">List name</span>
+          <input value.bind="name" class="field-input" placeholder="Weekly groceries" />
+        </label>
+
+        <label class="field-shell">
+          <span class="field-label">Description</span>
+          <input value.bind="description" class="field-input" placeholder="Core staples for the week" />
+        </label>
+
+        <label class="field-shell">
+          <span class="field-label">Default mode</span>
+          <select value.bind="mode" class="field-input">
+            <option repeat.for="modeOption of modes" model.bind="modeOption">${modeOption}</option>
+          </select>
+        </label>
+
+        <label class="field-shell">
+          <span class="field-label">Items, one per line</span>
+          <textarea value.bind="itemsText" rows="8" class="field-input resize-none" placeholder="plain flour&#10;full cream milk 2L&#10;eggs"></textarea>
+        </label>
+
+        <div class="flex flex-wrap gap-3">
+          <button class="action-button" disabled.bind="isSaving">${isSaving ? 'Saving…' : (formId ? 'Update list' : 'Save list')}</button>
+          <button if.bind="formId" class="action-button action-button--secondary" type="button" click.trigger="resetForm()">Clear edit</button>
+        </div>
+
+        <div if.bind="error" class="error-box">
+          ${error}
+        </div>
+      </form>
+    </section-shell>
+
+    <section-shell
+      heading="Watchlist"
+      subheading="Special alerts"
+      aside="Track a search term or retailer product with an optional target price. The API updates this from live comparisons and historical sightings."
+    >
+      <form class="grid gap-4" submit.trigger="handleWatchlistSubmit($event)">
+        <label class="field-shell">
+          <span class="field-label">Query</span>
+          <input value.bind="watchQuery" class="field-input" placeholder="free range eggs 12 pack" />
+        </label>
+
+        <label class="field-shell">
+          <span class="field-label">Target price</span>
+          <input value.bind="watchTargetPrice" class="field-input" placeholder="5.20" />
+        </label>
+
+        <label class="field-shell">
+          <span class="field-label">Note</span>
+          <input value.bind="watchNote" class="field-input" placeholder="Buy when it dips below this" />
+        </label>
+
+        <button class="action-button">Add watch</button>
+      </form>
+
+      <div class="mt-5 grid gap-3">
+        <div if.bind="!watchlist.length" class="empty-state">
+          No watchlist entries yet.
+        </div>
+
+        <article repeat.for="entry of watchlist" class="soft-panel">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="eyebrow">${entry.triggerState}</p>
+              <h3 class="mt-2 font-display text-2xl">${entry.query}</h3>
+              <p if.bind="entry.note" class="mt-2 text-sm muted-copy">${entry.note}</p>
+            </div>
+            <span class="pill-tag">${entry.retailer || 'any retailer'}</span>
+          </div>
+          <p if.bind="entry.latestSeenPrice != null" class="mt-4 text-sm muted-copy">
+            Latest: $${entry.latestSeenPrice.toFixed(2)} <span if.bind="entry.matchedProductName">• ${entry.matchedProductName}</span>
+          </p>
+          <p if.bind="entry.targetPrice != null" class="mt-2 text-sm muted-copy">Target: $${entry.targetPrice.toFixed(2)}</p>
+          <div class="mt-4">
+            <button class="icon-button icon-button--danger" click.trigger="removeWatchlist(entry.id)">Delete</button>
+          </div>
+        </article>
+      </div>
+    </section-shell>
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+    <section-shell
+      heading="Library"
+      subheading="Available lists"
+      aside="Each saved list preserves its preferred comparison mode and item set so it can feed straight into basket compare."
+    >
+      <div if.bind="isLoading" class="empty-state">
+        Loading saved lists…
+      </div>
+
+      <div if.bind="!isLoading && !lists.length" class="empty-state">
+        No saved lists yet. Create your first reusable household basket on the left.
+      </div>
+
+      <div class="grid gap-3">
+        <article repeat.for="list of lists" class="result-card">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="eyebrow">Saved list</p>
+              <h3 class="mt-2 font-display text-2xl">${list.name}</h3>
+              <p if.bind="list.description" class="mt-2 text-sm muted-copy">${list.description}</p>
+            </div>
+            <span class="pill-tag">${list.mode}</span>
+          </div>
+
+          <p class="mt-4 text-sm muted-copy">${list.items.length} items</p>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <span repeat.for="item of list.items" class="pill-tag">${item.query}</span>
+          </div>
+
+          <div class="mt-5 flex flex-wrap gap-3">
+            <button class="action-button action-button--secondary" click.trigger="editList(list)">Edit</button>
+            <button class="icon-button icon-button--danger" click.trigger="remove(list.id)">Delete</button>
+          </div>
+        </article>
+      </div>
+    </section-shell>
+
+    <section-shell
+      heading="Favorites"
+      subheading="Tracked products"
+      aside="Favorite items are the ones you actually buy. They become the fastest way to revisit recurring staples and inspect whether today looks like a buy."
+    >
+      <div if.bind="!favorites.length" class="empty-state">
+        No favorites yet. Save them from the compare screen.
+      </div>
+
+      <div class="grid gap-3">
+        <article repeat.for="favorite of favorites" class="soft-panel">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="eyebrow">${favorite.retailer}</p>
+              <h3 class="mt-2 font-display text-2xl">${favorite.canonicalName}</h3>
+              <p class="mt-2 text-sm muted-copy">
+                <span if.bind="favorite.brand">${favorite.brand} • </span>
+                <span if.bind="favorite.packLabel">${favorite.packLabel} • </span>
+                $${favorite.lastPrice.toFixed(2)}
+              </p>
+              <p if.bind="favorite.unitPriceLabel" class="mt-2 text-sm muted-copy">${favorite.unitPriceLabel}</p>
+            </div>
+            <button class="icon-button icon-button--danger" click.trigger="removeFavorite(favorite.productId)">Delete</button>
+          </div>
+        </article>
+      </div>
+    </section-shell>
+  </div>
+</div>
+</template>

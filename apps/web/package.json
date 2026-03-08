@@ -1,0 +1,21 @@
+{
+  "name": "@price-patrol/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@aurelia/router": "^2.0.0-rc.0",
+    "@aurelia/runtime-html": "^2.0.0-rc.0",
+    "aurelia": "^2.0.0-rc.0"
+  },
+  "devDependencies": {
+    "@aurelia/vite-plugin": "^2.0.0-rc.0",
+    "@tailwindcss/vite": "^4.1.13",
+    "tailwindcss": "^4.1.13",
+    "vite": "^7.1.7"
+  }
+}
