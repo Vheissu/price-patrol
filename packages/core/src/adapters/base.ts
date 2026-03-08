@@ -110,7 +110,7 @@ export abstract class BaseRetailerAdapter implements RetailerAdapter {
       health: this.health
     };
 
-    if (result.products.length) {
+    if (shouldCacheResult(result)) {
       await this.cache.set(cacheKey, result, projectConfig.cache.ttlMs);
     }
     return result;
@@ -134,4 +134,12 @@ export abstract class BaseRetailerAdapter implements RetailerAdapter {
   }
 
   protected abstract searchLive(intent: SearchIntent, options: SearchOptions): Promise<NormalizedProduct[]>;
+}
+
+function shouldCacheResult(result: AdapterSearchResult): boolean {
+  if (!result.products.length) {
+    return false;
+  }
+
+  return result.products.some((product) => product.sourceType !== "historical");
 }

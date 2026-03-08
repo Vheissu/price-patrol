@@ -2,7 +2,7 @@ import { BaseRetailerAdapter } from "./base.js";
 import { getRetailerConfig } from "../config/project-config.js";
 import { normalizeText } from "../parsing/query.js";
 import { SearchIntent, SearchOptions, NormalizedProduct } from "../types/domain.js";
-import { humanDelay, navigateLikeUser, withBrowserPage } from "./shared/browser.js";
+import { clearAndType, humanDelay, navigateLikeUser, withBrowserPage } from "./shared/browser.js";
 import { buildProductFromScrape } from "./shared/normalize.js";
 
 type ColesSearchState = {
@@ -52,11 +52,16 @@ export class ColesAdapter extends BaseRetailerAdapter {
   }
 
   protected async searchLive(intent: SearchIntent, options: SearchOptions): Promise<NormalizedProduct[]> {
-    const searchUrl = `https://www.coles.com.au/search/products?q=${encodeURIComponent(intent.rawQuery)}`;
     const retailerConfig = await getRetailerConfig(this.retailer);
 
     return withBrowserPage({ retailer: this.retailer, location: options.location }, async (page) => {
-      await navigateLikeUser(page, searchUrl);
+      await navigateLikeUser(page, "https://www.coles.com.au/");
+      await clearAndType(page, "#search-text-input", intent.rawQuery);
+      await humanDelay();
+      await Promise.allSettled([
+        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }),
+        page.keyboard.press("Enter")
+      ]);
       await page.waitForSelector("h1, [data-testid='product-list']", { timeout: 30_000 }).catch(() => undefined);
       await humanDelay();
 

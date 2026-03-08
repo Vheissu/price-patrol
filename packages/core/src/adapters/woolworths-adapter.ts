@@ -1,7 +1,7 @@
 import { BaseRetailerAdapter } from "./base.js";
 import { getRetailerConfig } from "../config/project-config.js";
 import { SearchIntent, SearchOptions, NormalizedProduct } from "../types/domain.js";
-import { humanDelay, navigateLikeUser, withBrowserPage } from "./shared/browser.js";
+import { clearAndType, humanDelay, navigateLikeUser, withBrowserPage } from "./shared/browser.js";
 import { buildProductFromScrape } from "./shared/normalize.js";
 import { normalizeText } from "../parsing/query.js";
 
@@ -48,12 +48,20 @@ export class WoolworthsAdapter extends BaseRetailerAdapter {
   }
 
   protected async searchLive(intent: SearchIntent, options: SearchOptions): Promise<NormalizedProduct[]> {
-    const searchUrl = `https://www.woolworths.com.au/shop/search/products?searchTerm=${encodeURIComponent(intent.rawQuery)}`;
     const retailerConfig = await getRetailerConfig(this.retailer);
 
     return withBrowserPage({ retailer: this.retailer, location: options.location }, async (page) => {
-      await navigateLikeUser(page, searchUrl);
-      await page.waitForFunction(() => Boolean((window as Window & { wowDataLayer?: unknown }).wowDataLayer), {
+      await navigateLikeUser(page, "https://www.woolworths.com.au/");
+      await clearAndType(page, "#wx-headerSearch", intent.rawQuery);
+      await humanDelay();
+      await Promise.allSettled([
+        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }),
+        page.click("#wx-button-header-search-find")
+      ]);
+      await page.waitForFunction(() => {
+        const data = (window as Window & { wowDataLayer?: { searchResults?: unknown } }).wowDataLayer?.searchResults;
+        return Boolean(data);
+      }, {
         timeout: 30_000
       });
       await humanDelay();

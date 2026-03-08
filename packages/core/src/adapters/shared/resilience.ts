@@ -53,10 +53,6 @@ export async function runWithResilience<T>({ retailer, task }: RunWithResilience
         return (await task()) as T;
       } catch (error) {
         lastFailure = asScrapeFailure(error);
-        if (!lastFailure.retryable || attempt >= policy.maxAttempts) {
-          throw lastFailure;
-        }
-
         const backoffMs = computeBackoffMs(
           attempt,
           lastFailure.retryAfterMs,
@@ -64,8 +60,14 @@ export async function runWithResilience<T>({ retailer, task }: RunWithResilience
           policy.maxBackoffMs,
           policy.jitterMs
         );
+
         if (lastFailure.kind === "rate-limit" || lastFailure.kind === "challenge") {
           cooldowns.set(retailer, Date.now() + Math.max(policy.cooldownMs, backoffMs));
+          throw lastFailure;
+        }
+
+        if (!lastFailure.retryable || attempt >= policy.maxAttempts) {
+          throw lastFailure;
         }
 
         await sleep(backoffMs);
@@ -97,6 +99,15 @@ export function createNavigationFailure(message: string, diagnostics?: string[])
   return new ScrapeFailure(message, {
     kind: "navigation",
     retryable: true,
+    diagnostics
+  });
+}
+
+export function createCooldownFailure(message: string, retryAfterMs?: number, diagnostics?: string[]): ScrapeFailure {
+  return new ScrapeFailure(message, {
+    kind: "cooldown",
+    retryable: false,
+    retryAfterMs,
     diagnostics
   });
 }
@@ -149,8 +160,11 @@ async function waitForCooldown(retailer: RetailerId): Promise<void> {
     return;
   }
 
-  await sleep(remainingMs);
-  cooldowns.delete(retailer);
+  throw createCooldownFailure(
+    `Retailer is cooling down after a recent anti-bot or rate-limit response. Retry after ${Math.ceil(remainingMs / 1000)}s.`,
+    remainingMs,
+    ["Skipped live scrape because the retailer is in a configured cooldown window."]
+  );
 }
 
 async function withRetailerPermit<T>(retailer: RetailerId, limit: number, task: () => Promise<T>): Promise<T> {

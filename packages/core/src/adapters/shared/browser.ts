@@ -97,6 +97,19 @@ export async function humanDelay(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, duration));
 }
 
+export async function clearAndType(page: Page, selector: string, value: string): Promise<void> {
+  await page.waitForSelector(selector, { timeout: 30_000 });
+  await page.click(selector, { clickCount: 3 });
+  await page.$eval(selector, (element) => {
+    const input = element as HTMLInputElement | HTMLTextAreaElement;
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await humanDelay();
+  await page.type(selector, value, { delay: 40 });
+}
+
 async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
     browserPromise = launchBrowser().catch((error) => {
@@ -214,14 +227,37 @@ async function assertHealthyNavigation(page: Page, statusCode?: number, retryAft
   const pageText = await page
     .evaluate(() => document.body?.innerText?.slice(0, 5000) ?? "")
     .catch(() => "");
+  const interruption = classifyNavigationInterruption(pageText);
+
+  if (interruption?.kind === "rate-limit") {
+    throw createRateLimitFailure(interruption.message, parseRetryAfter(retryAfterHeader), interruption.diagnostics);
+  }
+
+  if (interruption?.kind === "challenge") {
+    throw createChallengeFailure(interruption.message, interruption.diagnostics);
+  }
+}
+
+type NavigationInterruption = {
+  kind: "rate-limit" | "challenge";
+  message: string;
+  diagnostics: string[];
+};
+
+export function classifyNavigationInterruption(pageText: string): NavigationInterruption | undefined {
   const normalized = pageText.toLowerCase();
 
   if (
     normalized.includes("too many requests") ||
     normalized.includes("rate limit") ||
-    normalized.includes("unusual traffic")
+    normalized.includes("unusual traffic") ||
+    normalized.includes("automated queries")
   ) {
-    throw createRateLimitFailure("Retailer page indicates rate limiting or unusual traffic.", parseRetryAfter(retryAfterHeader));
+    return {
+      kind: "rate-limit",
+      message: "Retailer page indicates rate limiting or unusual traffic.",
+      diagnostics: ["Detected retailer copy associated with rate limiting or automated-traffic throttling."]
+    };
   }
 
   if (
@@ -229,8 +265,18 @@ async function assertHealthyNavigation(page: Page, statusCode?: number, retryAft
     normalized.includes("verify you are human") ||
     normalized.includes("access denied") ||
     normalized.includes("bot detection") ||
-    normalized.includes("security check")
+    normalized.includes("security check") ||
+    normalized.includes("pardon our interruption") ||
+    normalized.includes("made us think you were a bot") ||
+    normalized.includes("please stand by") ||
+    normalized.includes("make sure that cookies and javascript are enabled before reloading")
   ) {
-    throw createChallengeFailure("Retailer page indicates a bot challenge or access block.");
+    return {
+      kind: "challenge",
+      message: "Retailer page indicates an anti-bot challenge or access block.",
+      diagnostics: ["Detected retailer anti-bot interstitial copy in the loaded page."]
+    };
   }
+
+  return undefined;
 }
