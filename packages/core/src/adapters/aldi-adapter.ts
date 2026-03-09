@@ -49,6 +49,7 @@ type AldiDomCard = {
   href: string;
   brand?: string;
   name: string;
+  imageUrl?: string | null;
   size?: string | null;
   unitPriceText?: string | null;
   priceText?: string | null;
@@ -65,6 +66,7 @@ export class AldiAdapter extends BaseRetailerAdapter {
   }
 
   protected async searchLive(intent: SearchIntent, options: SearchOptions): Promise<NormalizedProduct[]> {
+    const searchUrl = `https://www.aldi.com.au/results?q=${encodeURIComponent(intent.rawQuery)}`;
     const retailerConfig = await getRetailerConfig(this.retailer);
 
     return withBrowserPage({ retailer: this.retailer, location: options.location }, async (page) => {
@@ -78,12 +80,28 @@ export class AldiAdapter extends BaseRetailerAdapter {
       await navigateLikeUser(page, "https://www.aldi.com.au/");
       await clearAndType(page, "#search-bar-input", intent.rawQuery);
       await humanDelay();
-      await Promise.allSettled([
-        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }),
-        page.keyboard.press("Enter")
-      ]);
+      await page.keyboard.press("Enter");
+      const reachedSearchPage = await waitForAldiSearchPage(page);
+      if (!reachedSearchPage) {
+        await navigateLikeUser(page, searchUrl);
+      }
+
       await page.waitForSelector("main h1, [aria-label='Results']", { timeout: 30_000 }).catch(() => undefined);
       await humanDelay();
+
+      const imageMap = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('a[href^="/product/"]')).reduce<Record<string, string>>((acc, link) => {
+          const href = link.getAttribute("href") ?? "";
+          const productId = href.match(/-(\d+)(?:$|[/?#])/i)?.[1];
+          const container = link.closest("section, article, li, div");
+          const image = container?.querySelector("img");
+          const imageUrl = image?.getAttribute("src") ?? image?.getAttribute("data-src");
+          if (productId && imageUrl && !acc[productId]) {
+            acc[productId] = imageUrl;
+          }
+          return acc;
+        }, {});
+      });
 
       const apiResponse = await responsePromise;
       const storeText = await page
@@ -100,7 +118,7 @@ export class AldiAdapter extends BaseRetailerAdapter {
         const stateResults = extractAldiSearchResults(payload);
         if (stateResults.length) {
           return stateResults
-            .map((result) => mapAldiStateProduct(result, storeText, options))
+            .map((result) => mapAldiStateProduct(result, storeText, imageMap[result.sku ?? ""], options))
             .filter((product): product is NormalizedProduct => Boolean(product))
             .slice(0, options.maxResults ?? retailerConfig.maxResults);
         }
@@ -110,6 +128,8 @@ export class AldiAdapter extends BaseRetailerAdapter {
         const cards = Array.from(document.querySelectorAll('a[href^="/product/"]')).map<AldiDomCard | null>((link) => {
           const href = link.getAttribute("href");
           const container = link.closest("section, article, li, div");
+          const image = container?.querySelector("img");
+          const imageUrl = image?.getAttribute("src") ?? image?.getAttribute("data-src") ?? null;
           const brand = container?.querySelector("p")?.textContent?.trim();
           const paragraphs = Array.from(container?.querySelectorAll("p") ?? []);
           const name = paragraphs[1]?.textContent?.trim() ?? link.textContent?.trim() ?? "";
@@ -122,7 +142,7 @@ export class AldiAdapter extends BaseRetailerAdapter {
             return null;
           }
 
-          return { href, brand, name, size, unitPriceText, priceText, promotionText };
+          return { href, brand, name, imageUrl, size, unitPriceText, priceText, promotionText };
         });
 
         return cards.filter((card): card is AldiDomCard => Boolean(card));
@@ -156,6 +176,7 @@ function parseAldiSearchPayload(raw: string): AldiSearchResponse | null {
 function mapAldiStateProduct(
   result: AldiSearchProduct,
   storeText: string | undefined,
+  imageUrl: string | undefined,
   options: SearchOptions
 ): NormalizedProduct | null {
   const promotionText = [
@@ -181,6 +202,7 @@ function mapAldiStateProduct(
     productId: result.sku,
     sourceUrl: buildAldiProductUrl(result),
     sourceType: "network",
+    imageUrl: normalizeAldiImageUrl(imageUrl),
     rawName: buildAldiDisplayName(result),
     brand: result.brandName,
     shelfPrice,
@@ -206,6 +228,7 @@ function mapAldiDomCard(card: AldiDomCard, storeText: string | undefined, option
     productId: card.href.split("-").pop(),
     sourceUrl: `https://www.aldi.com.au${card.href}`,
     sourceType: "search",
+    imageUrl: normalizeAldiImageUrl(card.imageUrl),
     rawName: appendSizeIfMissing(card.name, card.size),
     brand: card.brand,
     shelfPriceText: card.priceText,
@@ -269,4 +292,27 @@ function appendSizeIfMissing(name: string, size?: string | null): string {
 
   const compact = (value: string) => normalizeText(value).replace(/\s+/g, "");
   return compact(name).includes(compact(size)) ? name : `${name} ${size}`.trim();
+}
+
+async function waitForAldiSearchPage(page: import("puppeteer").Page): Promise<boolean> {
+  return page
+    .waitForFunction(() => location.pathname === "/results", { timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+}
+
+function normalizeAldiImageUrl(value?: string | null): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    return value;
+  }
+
+  if (value.startsWith("//")) {
+    return `https:${value}`;
+  }
+
+  return value.startsWith("/") ? `https://www.aldi.com.au${value}` : `https://www.aldi.com.au/${value}`;
 }

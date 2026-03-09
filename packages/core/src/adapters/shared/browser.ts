@@ -11,25 +11,32 @@ type BrowserPageOptions = {
 };
 
 let browserPromise: Promise<Browser> | undefined;
+const browserPromises = new Map<string, Promise<Browser>>();
 const contextPromises = new Map<string, Promise<BrowserContext>>();
+const pagePromises = new Map<string, Promise<Page>>();
 let cleanupRegistered = false;
+let launchSequence = 0;
 
 export async function withBrowserPage<T>(options: BrowserPageOptions, callback: (page: Page) => Promise<T>): Promise<T> {
   const config = await getProjectConfig();
-  const browser = await getBrowser();
+  const browser = await getBrowser(options);
   const context = config.browser.reuseSessions ? await getRetailerContext(browser, options) : await browser.createBrowserContext();
-  const page = await context.newPage();
+  const shouldReusePage = config.browser.reuseSessions && options.retailer === "coles";
+  const page = shouldReusePage ? await getRetailerPage(context, options) : await context.newPage();
 
-  await page.setUserAgent(config.browser.userAgent);
+  if (options.retailer !== "coles") {
+    await page.setUserAgent(config.browser.userAgent);
+    await page.setExtraHTTPHeaders({
+      "accept-language": config.browser.acceptLanguage
+    });
+    await page.emulateTimezone(config.browser.timezone).catch(() => undefined);
+  }
+
   await page.setViewport({ width: config.browser.viewportWidth, height: config.browser.viewportHeight });
-  await page.emulateTimezone(config.browser.timezone).catch(() => undefined);
   page.setDefaultNavigationTimeout(config.browser.navigationTimeoutMs);
   page.setDefaultTimeout(config.browser.navigationTimeoutMs);
-  await page.setExtraHTTPHeaders({
-    "accept-language": config.browser.acceptLanguage
-  });
 
-  if (config.browser.blockResourceTypes.length) {
+  if (config.browser.blockResourceTypes.length && options.retailer !== "coles") {
     await page.setRequestInterception(true);
     page.on("request", (request) => {
       if (config.browser.blockResourceTypes.includes(request.resourceType())) {
@@ -40,7 +47,7 @@ export async function withBrowserPage<T>(options: BrowserPageOptions, callback: 
     });
   }
 
-  if (config.browser.maskAutomation) {
+  if (config.browser.maskAutomation && options.retailer !== "coles") {
     await page.evaluateOnNewDocument(
       ({ locale, platform }) => {
         Object.defineProperty(navigator, "webdriver", { get: () => false });
@@ -59,8 +66,10 @@ export async function withBrowserPage<T>(options: BrowserPageOptions, callback: 
     return await callback(page);
   } finally {
     page.removeAllListeners("request");
-    await page.close();
-    if (!config.browser.reuseSessions) {
+    if (!shouldReusePage) {
+      await page.close();
+    }
+    if (!config.browser.reuseSessions && options.retailer !== "coles") {
       await context.close();
     }
   }
@@ -97,7 +106,7 @@ export async function humanDelay(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, duration));
 }
 
-export async function clearAndType(page: Page, selector: string, value: string): Promise<void> {
+export async function clearAndType(page: Page, selector: string, value: string, typeDelayMs = 15): Promise<void> {
   await page.waitForSelector(selector, { timeout: 30_000 });
   await page.click(selector, { clickCount: 3 });
   await page.$eval(selector, (element) => {
@@ -107,24 +116,36 @@ export async function clearAndType(page: Page, selector: string, value: string):
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await humanDelay();
-  await page.type(selector, value, { delay: 40 });
+  await page.type(selector, value, { delay: typeDelayMs });
 }
 
-async function getBrowser(): Promise<Browser> {
-  if (!browserPromise) {
-    browserPromise = launchBrowser().catch((error) => {
-      browserPromise = undefined;
-      throw error;
-    });
+async function getBrowser(options: BrowserPageOptions): Promise<Browser> {
+  const key = browserKey(options);
+  const existing = browserPromises.get(key);
+  if (existing) {
+    return existing;
   }
-  return browserPromise;
+
+  const created = launchBrowser(options, key).catch((error) => {
+    browserPromises.delete(key);
+    if (key === "shared") {
+      browserPromise = undefined;
+    }
+    throw error;
+  });
+
+  browserPromises.set(key, created);
+  if (key === "shared") {
+    browserPromise = created;
+  }
+  return created;
 }
 
-async function launchBrowser(): Promise<Browser> {
+async function launchBrowser(options: BrowserPageOptions, key: string): Promise<Browser> {
   const config = await getProjectConfig();
-  const preferredUserDataDir = resolveBrowserUserDataDir(config.browser.userDataDir);
+  const preferredUserDataDir = resolveBrowserUserDataDir(config.browser.userDataDir, options);
   const initialUserDataDir = hasProfileLockArtifacts(preferredUserDataDir)
-    ? `${preferredUserDataDir}-run-${process.pid}`
+    ? createRunUserDataDir(preferredUserDataDir)
     : preferredUserDataDir;
 
   try {
@@ -133,25 +154,29 @@ async function launchBrowser(): Promise<Browser> {
       args: config.browser.launchArgs,
       userDataDir: initialUserDataDir
     });
-    attachBrowserLifecycle(browser);
+    attachBrowserLifecycle(browser, key);
     return browser;
   } catch (error) {
     if (!isProfileLockError(error) || initialUserDataDir !== preferredUserDataDir) {
       throw error;
     }
 
-    const fallbackUserDataDir = `${preferredUserDataDir}-run-${process.pid}`;
+    const fallbackUserDataDir = createRunUserDataDir(preferredUserDataDir);
     const browser = await puppeteer.launch({
       headless: config.browser.headless,
       args: config.browser.launchArgs,
       userDataDir: fallbackUserDataDir
     });
-    attachBrowserLifecycle(browser);
+    attachBrowserLifecycle(browser, key);
     return browser;
   }
 }
 
 async function getRetailerContext(browser: Browser, options: BrowserPageOptions): Promise<BrowserContext> {
+  if (options.retailer === "coles") {
+    return browser.defaultBrowserContext();
+  }
+
   const key = contextKey(options.retailer, options.location);
   const existing = contextPromises.get(key);
   if (existing) {
@@ -163,14 +188,49 @@ async function getRetailerContext(browser: Browser, options: BrowserPageOptions)
   return created;
 }
 
+async function getRetailerPage(context: BrowserContext, options: BrowserPageOptions): Promise<Page> {
+  const key = contextKey(options.retailer, options.location);
+  const existing = pagePromises.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const created = (async () => {
+    const pages = await context.pages();
+    const page = pages.find((candidate) => !candidate.isClosed()) ?? (await context.newPage());
+    page.on("close", () => {
+      pagePromises.delete(key);
+    });
+    return page;
+  })().catch((error) => {
+    pagePromises.delete(key);
+    throw error;
+  });
+
+  pagePromises.set(key, created);
+  return created;
+}
+
 function contextKey(retailer: RetailerId, location?: LocationContext): string {
   return [retailer, location?.postcode ?? "default", location?.suburb ?? "default", location?.storeId ?? "default"].join(":");
 }
 
-function resolveBrowserUserDataDir(configuredPath: string): string {
+function browserKey(options: BrowserPageOptions): string {
+  return options.retailer === "coles" ? "coles" : "shared";
+}
+
+function resolveBrowserUserDataDir(configuredPath: string, options: BrowserPageOptions): string {
   const basePath = resolveProjectPath(configuredPath);
+  if (options.retailer === "coles") {
+    return `${basePath}-coles`;
+  }
   const profile = process.env.PRICE_PATROL_BROWSER_PROFILE?.trim();
   return profile ? join(basePath, `${profile}-${process.pid}`) : basePath;
+}
+
+function createRunUserDataDir(preferredUserDataDir: string): string {
+  launchSequence += 1;
+  return `${preferredUserDataDir}-run-${process.pid}-${Date.now()}-${launchSequence}`;
 }
 
 function hasProfileLockArtifacts(userDataDir: string): boolean {
@@ -188,10 +248,14 @@ function isProfileLockError(error: unknown): error is Error {
   return message.includes("browser is already running for") || message.includes("userdatadir") || message.includes("singletonlock");
 }
 
-function attachBrowserLifecycle(browser: Browser): void {
+function attachBrowserLifecycle(browser: Browser, key: string): void {
   browser.on("disconnected", () => {
-    browserPromise = undefined;
+    browserPromises.delete(key);
+    if (key === "shared") {
+      browserPromise = undefined;
+    }
     contextPromises.clear();
+    pagePromises.clear();
   });
 
   if (cleanupRegistered) {
@@ -209,10 +273,12 @@ function attachBrowserLifecycle(browser: Browser): void {
 }
 
 async function closeBrowser(): Promise<void> {
-  const activeBrowser = await browserPromise?.catch(() => undefined);
+  const activeBrowsers = await Promise.all(Array.from(browserPromises.values()).map((promise) => promise.catch(() => undefined)));
   browserPromise = undefined;
+  browserPromises.clear();
   contextPromises.clear();
-  await activeBrowser?.close().catch(() => undefined);
+  pagePromises.clear();
+  await Promise.all(activeBrowsers.map((browser) => browser?.close().catch(() => undefined)));
 }
 
 async function assertHealthyNavigation(page: Page, statusCode?: number, retryAfterHeader?: string): Promise<void> {

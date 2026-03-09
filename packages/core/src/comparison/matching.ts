@@ -41,6 +41,7 @@ function scoreProduct(
   );
   const requestedCoreTokens = tokenize(intent.coreType);
   const productTokens = tokenize(productText);
+  const semanticTokens = Array.from(new Set(intent.familyTerms.flatMap((term) => tokenize(term))));
 
   const reasons: string[] = [];
   let confidence = fuzzy(intent.coreType, productText);
@@ -56,7 +57,31 @@ function scoreProduct(
   if (tokenCoverage >= 0.75) {
     reasons.push("Core product terms are strongly covered.");
   } else if (requestedCoreTokens.length > 0 && tokenCoverage < 0.34) {
-    return rejected(product, "Core product terms do not align closely enough.");
+    const semanticCoverage = computeTokenCoverage(semanticTokens, productTokens);
+    if (semanticCoverage < 0.34) {
+      return rejected(product, "Core product terms do not align closely enough.");
+    }
+  }
+
+  if (intent.requiredMatchTerms.length && !matchesAnyPhrase(productText, intent.requiredMatchTerms)) {
+    return rejected(product, "Product misses the required family-specific terms.");
+  }
+
+  if (intent.excludedMatchTerms.length && matchesAnyPhrase(productText, intent.excludedMatchTerms)) {
+    return rejected(product, "Product matches excluded terms for this family.");
+  }
+
+  const semanticCoverage = computeTokenCoverage(semanticTokens, productTokens);
+  const substituteTermMatched = intent.substituteTerms.some((term) => productText.includes(term));
+  if (semanticCoverage > 0) {
+    confidence += semanticCoverage * 0.18;
+    if (semanticCoverage >= 0.34) {
+      reasons.push("Matches the same product family.");
+    }
+  }
+  if (substituteTermMatched) {
+    confidence += 0.1;
+    reasons.push("Known store-brand substitute for the requested branded product.");
   }
 
   for (const attribute of intent.attributeTerms) {
@@ -85,6 +110,9 @@ function scoreProduct(
       reasons.push("Brand preference matched.");
     } else if (intent.comparisonMode === "exact") {
       return rejected(product, "Exact match mode requires the requested brand.");
+    } else if (substituteTermMatched || semanticCoverage >= 0.5) {
+      confidence -= 0.02;
+      reasons.push("Brand differs, but the product family still aligns.");
     } else {
       confidence -= 0.08;
       reasons.push("Brand differs from the preferred brand.");
@@ -222,6 +250,10 @@ function computeTokenCoverage(requestedTokens: string[], productTokens: string[]
   const productTokenSet = new Set(productTokens);
   const matched = requestedTokens.filter((token) => productTokenSet.has(token)).length;
   return matched / requestedTokens.length;
+}
+
+function matchesAnyPhrase(productText: string, phrases: string[]): boolean {
+  return phrases.some((phrase) => productText.includes(phrase));
 }
 
 function comparePackSize(requested: NonNullable<SearchIntent["desiredPackSize"]>, actual: NonNullable<NormalizedProduct["packSize"]>): {

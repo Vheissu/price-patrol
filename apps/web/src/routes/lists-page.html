@@ -9,7 +9,7 @@
       <form class="grid gap-4" submit.trigger="handleSaveSubmit($event)">
         <label class="field-shell">
           <span class="field-label">List name</span>
-          <input value.bind="name" class="field-input" placeholder="Weekly groceries" />
+          <input value.bind="name" class="field-input" placeholder="Shopping list" />
         </label>
 
         <label class="field-shell">
@@ -20,18 +20,58 @@
         <label class="field-shell">
           <span class="field-label">Default mode</span>
           <select value.bind="mode" class="field-input">
-            <option repeat.for="modeOption of modes" model.bind="modeOption">${modeOption}</option>
+            <option repeat.for="modeOption of modeOptions" model.bind="modeOption.value">${modeOption.label}</option>
           </select>
         </label>
 
-        <label class="field-shell">
-          <span class="field-label">Items, one per line</span>
-          <textarea value.bind="itemsText" rows="8" class="field-input resize-none" placeholder="plain flour&#10;full cream milk 2L&#10;eggs"></textarea>
-        </label>
+        <div class="soft-panel">
+          <p class="eyebrow">Add item</p>
+          <div class="mt-3 grid gap-3 md:grid-cols-[1fr_7rem_auto]">
+            <label class="field-shell">
+              <span class="field-label">Product</span>
+              <input value.bind="draftItemQuery" class="field-input" placeholder="Suimin prawn and chicken noodles" />
+            </label>
+            <label class="field-shell">
+              <span class="field-label">Qty</span>
+              <input value.bind="draftItemQuantity" type="number" min="1" class="field-input" />
+            </label>
+            <button class="action-button md:mt-auto" type="button" click.trigger="addEditorItem()">Add item</button>
+          </div>
+        </div>
+
+        <div class="grid gap-3">
+          <div if.bind="!editorItems.length" class="empty-state">
+            Add products one at a time to build this list.
+          </div>
+
+          <div repeat.for="item of editorItems" class="soft-panel">
+            <div class="flex flex-col gap-3 md:flex-row md:items-center">
+              <div class="flex grow items-center gap-3">
+                <div class="flex flex-col gap-2">
+                  <button class="icon-button" type="button" click.trigger="moveEditorItem($index, -1)">↑</button>
+                  <button class="icon-button" type="button" click.trigger="moveEditorItem($index, 1)">↓</button>
+                </div>
+                <label class="field-shell grow">
+                  <span class="field-label">Item</span>
+                  <input value.bind="item.query" class="field-input" />
+                </label>
+              </div>
+              <label class="field-shell md:w-28">
+                <span class="field-label">Qty</span>
+                <input value.bind="item.quantity" type="number" min="1" class="field-input" />
+              </label>
+              <button class="icon-button icon-button--danger md:mt-6" type="button" click.trigger="removeEditorItem(item.id)">Remove</button>
+            </div>
+          </div>
+        </div>
 
         <div class="flex flex-wrap gap-3">
-          <button class="action-button" disabled.bind="isSaving">${isSaving ? 'Saving…' : (formId ? 'Update list' : 'Save list')}</button>
+          <button class="action-button" disabled.bind="isSaving">${isSaving ? 'Saving...' : (formId ? 'Update list' : 'Save list')}</button>
           <button if.bind="formId" class="action-button action-button--secondary" type="button" click.trigger="resetForm()">Clear edit</button>
+        </div>
+
+        <div if.bind="statusMessage" class="soft-panel">
+          ${statusMessage}
         </div>
 
         <div if.bind="error" class="error-box">
@@ -97,7 +137,7 @@
       aside="Each saved list preserves its preferred comparison mode and item set so it can feed straight into basket compare."
     >
       <div if.bind="isLoading" class="empty-state">
-        Loading saved lists…
+        Loading saved lists...
       </div>
 
       <div if.bind="!isLoading && !lists.length" class="empty-state">
@@ -117,7 +157,7 @@
 
           <p class="mt-4 text-sm muted-copy">${list.items.length} items</p>
           <div class="mt-4 flex flex-wrap gap-2">
-            <span repeat.for="item of list.items" class="pill-tag">${item.query}</span>
+            <span repeat.for="item of list.items" class="pill-tag">${item.quantity || 1}× ${item.query}</span>
           </div>
 
           <div class="mt-5 flex flex-wrap gap-3">
@@ -140,7 +180,11 @@
       <div class="grid gap-3">
         <article repeat.for="favorite of favorites" class="soft-panel">
           <div class="flex items-start justify-between gap-4">
-            <div>
+            <div class="flex items-start gap-3">
+              <div if.bind="favorite.imageUrl" class="result-card__thumb-shell">
+                <img class="result-card__thumb" src.bind="favorite.imageUrl" alt.bind="favorite.canonicalName" loading="lazy" />
+              </div>
+              <div>
               <p class="eyebrow">${favorite.retailer}</p>
               <h3 class="mt-2 font-display text-2xl">${favorite.canonicalName}</h3>
               <p class="mt-2 text-sm muted-copy">
@@ -149,6 +193,7 @@
                 $${favorite.lastPrice.toFixed(2)}
               </p>
               <p if.bind="favorite.unitPriceLabel" class="mt-2 text-sm muted-copy">${favorite.unitPriceLabel}</p>
+            </div>
             </div>
             <button class="icon-button icon-button--danger" click.trigger="removeFavorite(favorite.productId)">Delete</button>
           </div>

@@ -4,6 +4,7 @@ import { normalizeText } from "../parsing/query.js";
 import { SearchIntent, SearchOptions, NormalizedProduct } from "../types/domain.js";
 import { clearAndType, humanDelay, navigateLikeUser, withBrowserPage } from "./shared/browser.js";
 import { buildProductFromScrape } from "./shared/normalize.js";
+import { ScrapeFailure, asScrapeFailure, createNavigationFailure } from "./shared/resilience.js";
 
 type ColesSearchState = {
   results?: ColesSearchResult[];
@@ -46,89 +47,129 @@ type ColesDomCard = {
   promotionText?: string | null;
 };
 
+const primedSessions = new Set<string>();
+const COLES_SEARCH_INPUT_SELECTORS = [
+  "#search-text-input",
+  'input[name="search-text-input"]',
+  'input[placeholder="Search products & recipes"]',
+  'input[placeholder*="Search products"]'
+];
+
 export class ColesAdapter extends BaseRetailerAdapter {
   constructor() {
     super("coles");
   }
 
   protected async searchLive(intent: SearchIntent, options: SearchOptions): Promise<NormalizedProduct[]> {
+    const searchUrl = `https://www.coles.com.au/search/products?q=${encodeURIComponent(intent.rawQuery)}`;
     const retailerConfig = await getRetailerConfig(this.retailer);
+    const sessionKey = getColesSessionKey(options);
 
     return withBrowserPage({ retailer: this.retailer, location: options.location }, async (page) => {
-      await navigateLikeUser(page, "https://www.coles.com.au/");
-      await clearAndType(page, "#search-text-input", intent.rawQuery);
-      await humanDelay();
-      await Promise.allSettled([
-        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }),
-        page.keyboard.press("Enter")
-      ]);
-      await page.waitForSelector("h1, [data-testid='product-list']", { timeout: 30_000 }).catch(() => undefined);
-      await humanDelay();
+      let lastStep = "starting search";
+      let ready = false;
 
-      const pageData = await page.evaluate(() => {
-        const nextData = (window as Window & { __NEXT_DATA__?: { props?: { pageProps?: { searchResults?: unknown } } } }).__NEXT_DATA__;
-        const linkMap = Array.from(document.querySelectorAll('a[href^="/product/"]')).reduce<Record<string, string>>((acc, link) => {
-          const href = link.getAttribute("href");
-          const productId = href?.match(/-(\d+)(?:$|[/?#])/i)?.[1];
-          if (href && productId && !acc[productId]) {
-            acc[productId] = href;
-          }
-          return acc;
-        }, {});
-
-        const storeButton = Array.from(document.querySelectorAll("button")).find((button) =>
-          /set your location|you.re seeing items/i.test(button.textContent ?? "")
-        );
-
-        return {
-          searchResults: nextData?.props?.pageProps?.searchResults ?? null,
-          storeText: storeButton?.textContent?.trim(),
-          linkMap
-        };
-      });
-
-      const stateResults = extractColesResults(pageData.searchResults);
-      if (stateResults.length) {
-        return stateResults
-          .map((result) => mapColesStateProduct(result, pageData, options))
-          .filter((product): product is NormalizedProduct => Boolean(product))
-          .slice(0, options.maxResults ?? retailerConfig.maxResults);
-      }
-
-      const rawCards = await page.evaluate(() => {
-        const productLinks = Array.from(document.querySelectorAll('a[href^="/product/"]'));
-        const cards: Array<{
-          href: string;
-          name: string;
-          priceText?: string | null;
-          unitPriceText?: string | null;
-          promotionText?: string | null;
-        }> = [];
-        const seen = new Set<string>();
-
-        for (const link of productLinks) {
-          const href = link.getAttribute("href");
-          const name = link.textContent?.trim();
-          if (!href || !name || seen.has(href)) {
-            continue;
-          }
-
-          seen.add(href);
-          const container = link.closest("section, article, li, div");
-          const text = container?.textContent ?? "";
-          const priceText = text.match(/\$\d+(?:\.\d{1,2})?/)?.[0] ?? null;
-          const unitPriceText = text.match(/\$\d+(?:\.\d{1,2})?\s*\/\s*(?:1kg|1l|100g|100ml)/i)?.[0] ?? null;
-          const promotionText = text.includes("SPECIAL") || text.includes("DOWN DOWN") || text.includes("EVERY DAY") ? text : null;
-          cards.push({ href, name, priceText, unitPriceText, promotionText });
+      try {
+        if (primedSessions.has(sessionKey)) {
+          lastStep = "reused in-page search";
+          ready = await submitColesSearch(page, intent.rawQuery);
         }
 
-        return cards;
-      });
+        if (!ready) {
+          lastStep = "homepage search";
+          await navigateLikeUser(page, "https://www.coles.com.au/");
+          ready = await submitColesSearch(page, intent.rawQuery);
+        }
 
-      return rawCards
-        .map((card) => mapColesDomCard(card, pageData.storeText, options))
-        .filter((product): product is NormalizedProduct => Boolean(product))
-        .slice(0, options.maxResults ?? retailerConfig.maxResults);
+        if (!ready) {
+          lastStep = "direct search url";
+          await navigateLikeUser(page, searchUrl);
+          ready = await waitForColesSearchResults(page, 10_000);
+        }
+
+        if (!ready) {
+          throw createNavigationFailure("Coles search did not reach a results page.");
+        }
+
+        primedSessions.add(sessionKey);
+
+        await page.waitForSelector("h1, [data-testid='product-list']", { timeout: 30_000 }).catch(() => undefined);
+        await humanDelay();
+
+        const pageData = await page.evaluate(() => {
+          const nextData = (window as Window & { __NEXT_DATA__?: { props?: { pageProps?: { searchResults?: unknown } } } }).__NEXT_DATA__;
+          const linkMap = Array.from(document.querySelectorAll('a[href^="/product/"]')).reduce<Record<string, string>>((acc, link) => {
+            const href = link.getAttribute("href");
+            const productId = href?.match(/-(\d+)(?:$|[/?#])/i)?.[1];
+            if (href && productId && !acc[productId]) {
+              acc[productId] = href;
+            }
+            return acc;
+          }, {});
+
+          const storeButton = Array.from(document.querySelectorAll("button")).find((button) =>
+            /set your location|you.re seeing items/i.test(button.textContent ?? "")
+          );
+
+          return {
+            searchResults: nextData?.props?.pageProps?.searchResults ?? null,
+            storeText: storeButton?.textContent?.trim(),
+            linkMap
+          };
+        });
+
+        const stateResults = extractColesResults(pageData.searchResults);
+        if (stateResults.length) {
+          return stateResults
+            .map((result) => mapColesStateProduct(result, pageData, options))
+            .filter((product): product is NormalizedProduct => Boolean(product))
+            .slice(0, options.maxResults ?? retailerConfig.maxResults);
+        }
+
+        const rawCards = await page.evaluate(() => {
+          const productLinks = Array.from(document.querySelectorAll('a[href^="/product/"]'));
+          const cards: Array<{
+            href: string;
+            name: string;
+            priceText?: string | null;
+            unitPriceText?: string | null;
+            promotionText?: string | null;
+          }> = [];
+          const seen = new Set<string>();
+
+          for (const link of productLinks) {
+            const href = link.getAttribute("href");
+            const name = link.textContent?.trim();
+            if (!href || !name || seen.has(href)) {
+              continue;
+            }
+
+            seen.add(href);
+            const container = link.closest("section, article, li, div");
+            const text = container?.textContent ?? "";
+            const priceText = text.match(/\$\d+(?:\.\d{1,2})?/)?.[0] ?? null;
+            const unitPriceText = text.match(/\$\d+(?:\.\d{1,2})?\s*\/\s*(?:1kg|1l|100g|100ml)/i)?.[0] ?? null;
+            const promotionText = text.includes("SPECIAL") || text.includes("DOWN DOWN") || text.includes("EVERY DAY") ? text : null;
+            cards.push({ href, name, priceText, unitPriceText, promotionText });
+          }
+
+          return cards;
+        });
+
+        return rawCards
+          .map((card) => mapColesDomCard(card, pageData.storeText, options))
+          .filter((product): product is NormalizedProduct => Boolean(product))
+          .slice(0, options.maxResults ?? retailerConfig.maxResults);
+      } catch (error) {
+        const failure = asScrapeFailure(error);
+        const diagnostics = [...failure.diagnostics, ...(await captureColesFailureDiagnostics(page, intent.rawQuery, lastStep))];
+        throw new ScrapeFailure(failure.message, {
+          kind: failure.kind,
+          retryable: failure.retryable,
+          retryAfterMs: failure.retryAfterMs,
+          diagnostics
+        });
+      }
     });
   }
 }
@@ -237,4 +278,155 @@ function normalizeColesUnitPrice(value?: string): string | undefined {
   }
 
   return value.replace(/\s+/g, " ").replace("/ ", "/ ").trim();
+}
+
+function getColesSessionKey(options: SearchOptions): string {
+  return [options.location?.postcode ?? "default", options.location?.suburb ?? "default", options.location?.storeId ?? "default"].join(":");
+}
+
+async function submitColesSearch(page: import("puppeteer").Page, query: string): Promise<boolean> {
+  const searchSelector = await waitForColesHomepageSearchInput(page, 10_000);
+  if (!searchSelector) {
+    return false;
+  }
+
+  await dismissColesLocationPrompt(page);
+  await clearAndType(page, searchSelector, query, 35);
+  await humanDelay();
+  await page.keyboard.press("Enter");
+
+  if (await waitForColesSearchResults(page, 8_000)) {
+    return true;
+  }
+
+  const clicked = await clickColesSearchButton(page);
+  if (!clicked) {
+    return false;
+  }
+
+  return waitForColesSearchResults(page, 8_000);
+}
+
+async function waitForColesHomepageSearchInput(page: import("puppeteer").Page, timeout: number): Promise<string | undefined> {
+  const selector = await page
+    .waitForFunction(
+      (selectors) => {
+        for (const candidate of selectors) {
+          const element = document.querySelector(candidate);
+          if (!(element instanceof HTMLElement)) {
+            continue;
+          }
+
+          const style = window.getComputedStyle(element);
+          if (style.visibility === "hidden" || style.display === "none") {
+            continue;
+          }
+
+          const bounds = element.getBoundingClientRect();
+          if (bounds.width <= 0 || bounds.height <= 0) {
+            continue;
+          }
+
+          return candidate;
+        }
+
+        return undefined;
+      },
+      { timeout },
+      COLES_SEARCH_INPUT_SELECTORS
+    )
+    .then((handle) => handle.jsonValue() as Promise<string | undefined>)
+    .catch(() => undefined);
+
+  return selector;
+}
+
+async function dismissColesLocationPrompt(page: import("puppeteer").Page): Promise<void> {
+  const dismissed = await page
+    .evaluate(() => {
+      const closeButton = Array.from(document.querySelectorAll("button")).find((button) =>
+        /close popup/i.test(button.textContent ?? "") || /close popup/i.test(button.getAttribute("aria-label") ?? "")
+      );
+
+      if (!(closeButton instanceof HTMLElement)) {
+        return false;
+      }
+
+      closeButton.click();
+      return true;
+    })
+    .catch(() => false);
+
+  if (dismissed) {
+    await humanDelay();
+  }
+}
+
+async function clickColesSearchButton(page: import("puppeteer").Page): Promise<boolean> {
+  return page
+    .evaluate(() => {
+      const button = Array.from(document.querySelectorAll("button")).find((candidate) => /^search$/i.test(candidate.textContent?.trim() ?? ""));
+      if (!(button instanceof HTMLElement)) {
+        return false;
+      }
+
+      button.click();
+      return true;
+    })
+    .catch(() => false);
+}
+
+async function waitForColesSearchResults(page: import("puppeteer").Page, timeout: number): Promise<boolean> {
+  return page
+    .waitForFunction(
+      () => {
+        if (!location.pathname.startsWith("/search/products")) {
+          return false;
+        }
+
+        const nextData = (window as Window & {
+          __NEXT_DATA__?: { props?: { pageProps?: { searchResults?: { results?: unknown[] } } } };
+        }).__NEXT_DATA__;
+        const stateCount = nextData?.props?.pageProps?.searchResults?.results?.length ?? 0;
+        const productLinks = document.querySelectorAll('a[href^="/product/"]').length;
+        const bodyText = document.body?.innerText ?? "";
+        return stateCount > 0 || productLinks > 0 || /0 results found|showing results for/i.test(bodyText);
+      },
+      { timeout }
+    )
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function captureColesFailureDiagnostics(
+  page: import("puppeteer").Page,
+  query: string,
+  step: string
+): Promise<string[]> {
+  const snapshot = await page
+    .evaluate(() => ({
+      url: location.href,
+      title: document.title,
+      hasSearchInput: Boolean(document.querySelector('#search-text-input, input[name="search-text-input"], input[placeholder*="Search products"]')),
+      hasResultsHeading: /results for/i.test(document.body?.innerText ?? ""),
+      productLinkCount: document.querySelectorAll('a[href^="/product/"]').length,
+      bodySnippet: (document.body?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 800)
+    }))
+    .catch(() => ({
+      url: "unavailable",
+      title: "unavailable",
+      hasSearchInput: false,
+      hasResultsHeading: false,
+      productLinkCount: 0,
+      bodySnippet: "Unable to capture Coles failure page content."
+    }));
+
+  return [
+    `Coles failure query: ${query}`,
+    `Coles failure step: ${step}`,
+    `Coles failure url: ${snapshot.url || "unavailable"}`,
+    `Coles failure title: ${snapshot.title || "unavailable"}`,
+    `Coles failure flags: searchInput=${snapshot.hasSearchInput} resultsHeading=${snapshot.hasResultsHeading} productLinks=${snapshot.productLinkCount}`,
+    `Coles failure body: ${snapshot.bodySnippet || "empty"}`
+  ];
 }

@@ -1,24 +1,46 @@
 import { customElement } from "aurelia";
 import template from "./lists-page.html?raw";
-import { apiClient, type CompareMode, type FavoriteProductSummary, type SavedListSummary, type WatchlistSummary } from "../services/api-client";
+import { apiClient, type BasketLineInput, type CompareMode, type FavoriteProductSummary, type SavedListSummary, type WatchlistSummary } from "../services/api-client";
+
+type ModeOption = {
+  value: CompareMode;
+  label: string;
+};
+
+type EditorItem = BasketLineInput & {
+  quantity: number;
+};
+
+const DEFAULT_LIST_NAME = "Shopping list";
 
 @customElement({ name: "lists-page", template })
 export class ListsPage {
   readonly api = apiClient();
-  readonly modes: CompareMode[] = ["equivalent", "exact", "best-value"];
+  readonly modeOptions: ModeOption[] = [
+    { value: "equivalent", label: "Flexible match" },
+    { value: "exact", label: "Exact brand + pack" },
+    { value: "best-value", label: "Best value" }
+  ];
 
   isLoading = false;
   isSaving = false;
   error = "";
+  statusMessage = "";
   lists: SavedListSummary[] = [];
   favorites: FavoriteProductSummary[] = [];
   watchlist: WatchlistSummary[] = [];
 
   formId?: string;
-  name = "";
+  name = DEFAULT_LIST_NAME;
   description = "";
   mode: CompareMode = "equivalent";
-  itemsText = "plain flour\nfull cream milk 2L\neggs";
+  draftItemQuery = "";
+  draftItemQuantity = 1;
+  editorItems: EditorItem[] = [
+    { id: crypto.randomUUID(), query: "plain flour", quantity: 1 },
+    { id: crypto.randomUUID(), query: "full cream milk 2L", quantity: 1 },
+    { id: crypto.randomUUID(), query: "eggs", quantity: 1 }
+  ];
   watchQuery = "";
   watchTargetPrice = "";
   watchNote = "";
@@ -62,35 +84,91 @@ export class ListsPage {
     this.name = list.name;
     this.description = list.description ?? "";
     this.mode = list.mode;
-    this.itemsText = list.items.map((item) => item.query).join("\n");
+    this.editorItems = list.items.map((item) => ({
+      id: crypto.randomUUID(),
+      query: item.query,
+      quantity: item.quantity ?? 1
+    }));
+    this.statusMessage = `Editing ${list.name}.`;
   }
 
   resetForm(): void {
     this.formId = undefined;
-    this.name = "";
+    this.name = DEFAULT_LIST_NAME;
     this.description = "";
     this.mode = "equivalent";
-    this.itemsText = "";
+    this.draftItemQuery = "";
+    this.draftItemQuantity = 1;
+    this.editorItems = [];
+    this.statusMessage = "";
+  }
+
+  addEditorItem(): void {
+    const query = this.draftItemQuery.trim();
+    if (!query) {
+      return;
+    }
+
+    const existing = this.editorItems.find((item) => normalizeListQuery(item.query) === normalizeListQuery(query));
+    if (existing) {
+      existing.quantity += Math.max(1, Number(this.draftItemQuantity) || 1);
+      this.editorItems = [...this.editorItems];
+    } else {
+      this.editorItems = [
+        ...this.editorItems,
+        {
+          id: crypto.randomUUID(),
+          query,
+          quantity: Math.max(1, Number(this.draftItemQuantity) || 1)
+        }
+      ];
+    }
+
+    this.draftItemQuery = "";
+    this.draftItemQuantity = 1;
+  }
+
+  removeEditorItem(itemId: string): void {
+    this.editorItems = this.editorItems.filter((item) => item.id !== itemId);
+  }
+
+  moveEditorItem(index: number, direction: -1 | 1): void {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= this.editorItems.length) {
+      return;
+    }
+
+    const clone = [...this.editorItems];
+    const [item] = clone.splice(index, 1);
+    clone.splice(nextIndex, 0, item);
+    this.editorItems = clone;
   }
 
   async save(): Promise<void> {
     this.isSaving = true;
     this.error = "";
+    this.statusMessage = "";
+    const isUpdating = Boolean(this.formId);
 
     try {
+      if (!this.editorItems.length) {
+        throw new Error("Add at least one item before saving this list.");
+      }
+
       await this.api.saveList({
         id: this.formId,
         name: this.name.trim(),
         description: this.description.trim() || undefined,
         mode: this.mode,
-        items: this.itemsText
-          .split("\n")
-          .map((value) => value.trim())
-          .filter(Boolean)
-          .map((query, index) => ({ id: `${index + 1}`, query, quantity: 1 }))
+        items: this.editorItems.map((item) => ({
+          id: item.id,
+          query: item.query.trim(),
+          quantity: Math.max(1, Number(item.quantity) || 1)
+        }))
       });
       await this.refresh();
       this.resetForm();
+      this.statusMessage = isUpdating ? "List updated." : "List saved.";
     } catch (error) {
       this.error = error instanceof Error ? error.message : "Unable to save this list.";
     } finally {
@@ -144,4 +222,8 @@ export class ListsPage {
       this.error = error instanceof Error ? error.message : "Unable to delete favorite product.";
     }
   }
+}
+
+function normalizeListQuery(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
 }

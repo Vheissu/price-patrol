@@ -71,7 +71,9 @@ function matchesIntent(row: HistoricalRow, intent: SearchIntent): boolean {
   const coreMatch = haystack.includes(intent.coreType) || intent.coreType.split(" ").every((term) => haystack.includes(term));
   const attributeMatch = intent.attributeTerms.every((term) => haystack.includes(term));
   const brandMatch = intent.brandPreference ? haystack.includes(intent.brandPreference) : true;
-  return coreMatch || (attributeMatch && brandMatch);
+  const familyMatch = intent.familyTerms.some((term) => haystack.includes(term));
+  const substituteMatch = intent.substituteTerms.some((term) => haystack.includes(term));
+  return coreMatch || (attributeMatch && brandMatch) || (attributeMatch && familyMatch) || substituteMatch;
 }
 
 function toHistoricalProduct(row: HistoricalRow): NormalizedProduct {

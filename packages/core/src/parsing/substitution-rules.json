@@ -1,0 +1,178 @@
+[
+  {
+    "key": "brown-rice",
+    "triggers": ["brown rice"],
+    "defaultCoreType": "brown rice",
+    "familyTerms": ["brown rice", "rice", "long grain brown rice", "brown basmati rice"],
+    "substituteTerms": [],
+    "fallbackSearchPhrases": ["brown rice 1kg", "long grain brown rice", "brown basmati rice"],
+    "requiredMatchTerms": ["brown rice", "rice"],
+    "excludedMatchTerms": ["cracker", "crackers", "cake", "cakes", "microwave", "microwavable", "pouch", "cup", "cups", "noodle", "noodles", "baby food", "dog food", "quinoa", "beans", "khichdi", "puffs"]
+  },
+  {
+    "key": "zero-sugar-cola",
+    "triggers": ["pepsi max", "pepsi no sugar", "coke no sugar", "coke zero", "coca cola no sugar", "coca cola zero sugar", "diet soft drink"],
+    "defaultCoreType": "zero sugar cola",
+    "familyTerms": ["zero sugar cola", "no sugar cola", "cola", "soft drink", "soda"],
+    "substituteTerms": ["cola zero", "diet cola", "zero cola"],
+    "fallbackSearchPhrases": ["zero sugar cola", "cola zero", "cola soft drink"],
+    "requiredMatchTerms": ["cola", "soft drink", "soda"]
+  },
+  {
+    "key": "energy-drink",
+    "triggers": ["red bull", "monster", "mother", "v energy"],
+    "defaultCoreType": "energy drink",
+    "familyTerms": ["energy drink", "caffeinated drink", "energy beverage"],
+    "substituteTerms": ["flying power"],
+    "fallbackSearchPhrases": ["energy drink", "energy drink cans", "flying power energy drink"],
+    "requiredMatchTerms": ["energy drink", "flying power"]
+  },
+  {
+    "key": "toothpaste",
+    "triggers": ["colgate", "sensodyne", "oral b toothpaste", "oral-b toothpaste"],
+    "defaultCoreType": "toothpaste",
+    "familyTerms": ["toothpaste", "tooth paste", "dental paste"],
+    "substituteTerms": ["dental care toothpaste"],
+    "fallbackSearchPhrases": ["toothpaste", "fluoride toothpaste"],
+    "requiredMatchTerms": ["toothpaste", "tooth paste"]
+  },
+  {
+    "key": "mouthwash",
+    "triggers": ["mouthwash", "listerine", "savacol"],
+    "defaultCoreType": "mouthwash",
+    "familyTerms": ["mouthwash", "mouth rinse", "oral rinse"],
+    "substituteTerms": ["oral rinse"],
+    "fallbackSearchPhrases": ["mouthwash", "oral rinse"],
+    "requiredMatchTerms": ["mouthwash", "mouth rinse", "oral rinse"]
+  },
+  {
+    "key": "disinfectant-wipes",
+    "triggers": ["disinfectant wipes", "cleaning wipes", "antibacterial wipes", "surface wipes"],
+    "defaultCoreType": "disinfectant wipes",
+    "familyTerms": ["disinfectant wipes", "cleaning wipes", "surface wipes", "antibacterial wipes"],
+    "substituteTerms": ["power force", "surface cleaning wipes"],
+    "fallbackSearchPhrases": ["disinfectant wipes", "surface cleaning wipes"],
+    "requiredMatchTerms": ["wipes", "wipe"],
+    "excludedMatchTerms": ["disinfectant liquid", "denture", "toilet cleaner"]
+  },
+  {
+    "key": "multipurpose-cleaner",
+    "triggers": ["spray and wipe", "spray n wipe", "ajax spray and wipe"],
+    "defaultCoreType": "multipurpose cleaner",
+    "familyTerms": ["multipurpose cleaner", "multi purpose cleaner", "surface cleaner", "cleaning spray"],
+    "substituteTerms": ["power force", "all purpose cleaner", "surface spray"],
+    "fallbackSearchPhrases": ["multipurpose cleaner spray", "surface cleaner spray"],
+    "requiredMatchTerms": ["cleaner", "spray", "surface cleaner"]
+  },
+  {
+    "key": "disinfectant-spray",
+    "triggers": ["glen 20"],
+    "defaultCoreType": "disinfectant spray",
+    "familyTerms": ["disinfectant spray", "antibacterial spray", "surface disinfectant"],
+    "substituteTerms": ["power force", "antibacterial spray"],
+    "fallbackSearchPhrases": ["disinfectant spray", "surface disinfectant spray"],
+    "requiredMatchTerms": ["spray", "disinfectant spray"]
+  },
+  {
+    "key": "glass-cleaner",
+    "triggers": ["windex"],
+    "defaultCoreType": "glass cleaner",
+    "familyTerms": ["glass cleaner", "window cleaner", "glass spray"],
+    "substituteTerms": ["power force", "window spray"],
+    "fallbackSearchPhrases": ["glass cleaner", "window cleaner spray"],
+    "requiredMatchTerms": ["glass cleaner", "window cleaner", "window spray"]
+  },
+  {
+    "key": "paracetamol",
+    "triggers": ["panadol", "paracetamol"],
+    "defaultCoreType": "paracetamol tablets",
+    "familyTerms": ["paracetamol", "paracetamol tablets", "pain relief tablets"],
+    "substituteTerms": ["pain relief", "paracetamol caplets"],
+    "fallbackSearchPhrases": ["paracetamol tablets", "pain relief tablets"],
+    "requiredMatchTerms": ["paracetamol", "panadol"],
+    "excludedMatchTerms": ["ibuprofen", "aspirin", "denture", "cleaning"]
+  },
+  {
+    "key": "ibuprofen",
+    "triggers": ["nurofen", "ibuprofen"],
+    "defaultCoreType": "ibuprofen tablets",
+    "familyTerms": ["ibuprofen", "ibuprofen tablets", "anti inflammatory tablets", "pain relief tablets"],
+    "substituteTerms": ["ibuprofen caplets"],
+    "fallbackSearchPhrases": ["ibuprofen tablets", "pain relief tablets ibuprofen"],
+    "requiredMatchTerms": ["ibuprofen", "nurofen"],
+    "excludedMatchTerms": ["paracetamol", "aspirin", "denture", "cleaning"]
+  },
+  {
+    "key": "aspirin",
+    "triggers": ["aspirin", "disprin"],
+    "defaultCoreType": "aspirin tablets",
+    "familyTerms": ["aspirin", "aspirin tablets", "pain relief tablets"],
+    "substituteTerms": ["soluble aspirin"],
+    "fallbackSearchPhrases": ["aspirin tablets", "pain relief tablets aspirin"],
+    "requiredMatchTerms": ["aspirin", "disprin"],
+    "excludedMatchTerms": ["denture", "cleaning", "ibuprofen", "paracetamol"]
+  },
+  {
+    "key": "potato-chips",
+    "triggers": ["red rock deli", "kettle", "smith s", "smith's", "thins", "chips"],
+    "defaultCoreType": "potato chips",
+    "familyTerms": ["potato chips", "chips", "crisps"],
+    "substituteTerms": ["sea salt chips", "deli style chips"],
+    "fallbackSearchPhrases": ["potato chips", "chips sharing bag"],
+    "requiredMatchTerms": ["chips", "crisps"]
+  },
+  {
+    "key": "corn-chips",
+    "triggers": ["doritos", "cc s", "cc's"],
+    "defaultCoreType": "corn chips",
+    "familyTerms": ["corn chips", "tortilla chips", "nacho chips"],
+    "substituteTerms": [],
+    "fallbackSearchPhrases": ["corn chips", "tortilla chips"],
+    "requiredMatchTerms": ["corn chips", "tortilla chips", "nacho chips"]
+  },
+  {
+    "key": "stacked-crisps",
+    "triggers": ["pringles"],
+    "defaultCoreType": "stacked potato crisps",
+    "familyTerms": ["stacked potato crisps", "stack chips", "potato crisps"],
+    "substituteTerms": [],
+    "fallbackSearchPhrases": ["stacked potato crisps", "potato crisps canister"],
+    "requiredMatchTerms": ["crisps", "chips", "pringles"]
+  },
+  {
+    "key": "sweet-biscuits",
+    "triggers": ["tim tam", "oreo", "scotch finger", "biscuits", "cookies"],
+    "defaultCoreType": "sweet biscuits",
+    "familyTerms": ["sweet biscuits", "biscuits", "cookies"],
+    "substituteTerms": ["chocolate biscuits", "cream biscuits"],
+    "fallbackSearchPhrases": ["sweet biscuits", "cookies biscuits"],
+    "requiredMatchTerms": ["biscuits", "biscuit", "cookies", "cookie"]
+  },
+  {
+    "key": "wheat-biscuits-cereal",
+    "triggers": ["weet bix", "weet-bix"],
+    "defaultCoreType": "wheat biscuits cereal",
+    "familyTerms": ["wheat biscuits cereal", "breakfast biscuits cereal", "wheat cereal"],
+    "substituteTerms": [],
+    "fallbackSearchPhrases": ["wheat biscuits cereal", "breakfast wheat biscuits"],
+    "requiredMatchTerms": ["wheat biscuits", "breakfast biscuits", "wheat cereal"]
+  },
+  {
+    "key": "chocolate-rice-cereal",
+    "triggers": ["coco pops"],
+    "defaultCoreType": "chocolate rice cereal",
+    "familyTerms": ["chocolate rice cereal", "choco rice cereal", "puffed rice cereal"],
+    "substituteTerms": [],
+    "fallbackSearchPhrases": ["chocolate rice cereal", "puffed rice cereal chocolate"],
+    "requiredMatchTerms": ["rice cereal", "puffed rice", "coco pops"]
+  },
+  {
+    "key": "malt-cereal",
+    "triggers": ["nutri grain", "nutri-grain"],
+    "defaultCoreType": "malt cereal",
+    "familyTerms": ["malt cereal", "breakfast cereal", "crispy cereal"],
+    "substituteTerms": [],
+    "fallbackSearchPhrases": ["malt cereal", "crunchy breakfast cereal"],
+    "requiredMatchTerms": ["malt cereal", "nutri grain", "breakfast cereal"]
+  }
+]

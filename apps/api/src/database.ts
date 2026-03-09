@@ -24,6 +24,10 @@ export function getDatabasePath(): string {
   return resolveProjectPath(".price-patrol-data/price-patrol.db");
 }
 
+export function getProductImageCacheDir(): string {
+  return resolveProjectPath(".price-patrol-data/product-images");
+}
+
 function initializeDatabase(db: DatabaseSync): void {
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -116,6 +120,21 @@ function initializeDatabase(db: DatabaseSync): void {
 
     CREATE INDEX IF NOT EXISTS idx_match_preferences_query
       ON match_preferences(normalized_query, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS cached_product_images (
+      cache_key TEXT PRIMARY KEY,
+      product_id TEXT,
+      retailer TEXT NOT NULL,
+      original_url TEXT NOT NULL UNIQUE,
+      local_path TEXT NOT NULL,
+      content_type TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_accessed_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_cached_product_images_product
+      ON cached_product_images(product_id, updated_at DESC);
   `);
 
   ensureColumn(db, "product_observations", "source_url", "TEXT");

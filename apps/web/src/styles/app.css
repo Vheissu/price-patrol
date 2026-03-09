@@ -142,6 +142,46 @@ button, input, select, textarea { font: inherit; }
   background: linear-gradient(90deg, var(--accent), var(--sage));
 }
 
+.result-card__summary {
+  display: flex; align-items: flex-start; gap: 1rem;
+}
+
+.result-card__thumb-shell {
+  display: flex; align-items: center; justify-content: center;
+  width: 5rem; min-width: 5rem; height: 5rem;
+  border-radius: 0.9rem; border: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, #fff, var(--surface-dim));
+  overflow: hidden;
+}
+
+.result-card__thumb-shell--placeholder {
+  background: linear-gradient(180deg, #f6f3ed, #efebe3);
+}
+
+.result-card__thumb {
+  width: 100%; height: 100%; object-fit: contain; padding: 0.35rem;
+}
+
+.result-card__thumb-logo {
+  width: 2.5rem; height: 2.5rem; object-fit: contain;
+}
+
+.result-card__meta-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+}
+
+.result-card__retailer-pill {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface-dim); padding: 0.3rem 0.55rem;
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--muted);
+}
+
+.result-card__retailer-logo {
+  width: 1rem; height: 1rem; object-fit: contain;
+}
+
 /* ── Mini Stats ────────────────────────────────── */
 
 .mini-stat {
@@ -357,6 +397,117 @@ select.option-input { width: auto; min-width: 7rem; }
 
 .status-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 
+.progress-panel {
+  border: 1px solid var(--border-subtle); border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(249,247,243,0.95));
+  padding: 1rem;
+  box-shadow: 0 4px 20px rgba(26, 61, 46, 0.05);
+}
+
+.progress-panel__header {
+  display: flex; flex-direction: column; gap: 0.85rem;
+}
+
+.progress-panel__title {
+  font-family: var(--font-display); font-size: 1.35rem; line-height: 1.15; color: var(--ink);
+}
+
+.progress-retailers {
+  display: flex; flex-wrap: wrap; gap: 0.5rem;
+}
+
+.progress-retailer {
+  display: inline-flex; align-items: center; gap: 0.45rem;
+  border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); padding: 0.35rem 0.55rem;
+  font-size: 0.74rem; font-weight: 600; color: var(--muted);
+}
+
+.progress-retailer__logo {
+  width: 1.05rem; height: 1.05rem; object-fit: contain;
+}
+
+.progress-steps {
+  display: grid; gap: 0.75rem; margin-top: 1rem;
+}
+
+.progress-step {
+  display: grid; grid-template-columns: 0.9rem minmax(0, 1fr); gap: 0.7rem;
+  padding: 0.8rem 0.9rem; border-radius: 0.85rem;
+  border: 1px solid var(--border-subtle); background: rgba(255,255,255,0.6);
+  transition: border-color 220ms ease, background 220ms ease, box-shadow 220ms ease, transform 220ms ease;
+}
+
+.progress-step--active {
+  border-color: rgba(26,61,46,0.18);
+  background: rgba(26,61,46,0.04);
+  box-shadow: 0 10px 24px rgba(26, 61, 46, 0.07);
+  transform: translateY(-1px);
+}
+
+.progress-step--done {
+  border-color: rgba(45,122,74,0.18);
+  background: rgba(45,122,74,0.05);
+}
+
+.progress-step__marker {
+  display: flex; align-items: center; justify-content: center;
+  width: 1.15rem; height: 1.15rem; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface);
+  margin-top: 0.05rem;
+  transition: transform 220ms ease, background 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.progress-step--active .progress-step__marker {
+  background: var(--accent);
+  border-color: rgba(201,74,46,0.3);
+  box-shadow: 0 0 0 6px rgba(201,74,46,0.12);
+  transform: scale(1.02);
+}
+
+.progress-step--done .progress-step__marker {
+  background: var(--sage);
+  border-color: rgba(45,122,74,0.28);
+}
+
+.progress-step__title {
+  font-size: 0.8rem; font-weight: 700; color: var(--ink);
+  transition: color 220ms ease;
+}
+
+.progress-step__detail {
+  margin-top: 0.2rem; font-size: 0.78rem; line-height: 1.45; color: var(--muted);
+  transition: color 220ms ease;
+}
+
+.progress-step--active .progress-step__title {
+  color: var(--primary);
+}
+
+.progress-step--done .progress-step__title,
+.progress-step--done .progress-step__detail {
+  color: var(--sage);
+}
+
+.progress-step__marker-glyph {
+  font-size: 0.56rem; line-height: 1; font-weight: 800; text-transform: uppercase;
+  color: transparent;
+}
+
+.progress-step--active .progress-step__marker-glyph,
+.progress-step--done .progress-step__marker-glyph {
+  color: var(--surface);
+}
+
+.progress-step--active .progress-step__marker-glyph {
+  animation: progressPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes progressPulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
 /* ── Nav Card (kept for other pages) ───────────── */
 
 .nav-card {
@@ -396,6 +547,7 @@ select.option-input { width: auto; min-width: 7rem; }
   .alternatives-grid { grid-template-columns: repeat(2, 1fr); }
   .intel-grid { grid-template-columns: repeat(4, 1fr); }
   .basket-actions-grid { grid-template-columns: minmax(0, 1fr) 12rem; }
+  .progress-panel__header { align-items: flex-start; justify-content: space-between; flex-direction: row; }
 }
 
 @media (min-width: 1024px) {

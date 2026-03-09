@@ -7,9 +7,9 @@
         <span class="top-bar__tagline hidden sm:inline">Grocery price radar</span>
       </div>
       <nav class="top-bar__nav" aria-label="Primary">
-        <a repeat.for="item of navigation" class="top-bar__link" load.bind="item.route">
+        <button repeat.for="item of navigation" type="button" class="top-bar__link" click.trigger="navigate(item.route)">
           ${item.label}
-        </a>
+        </button>
       </nav>
     </div>
   </header>

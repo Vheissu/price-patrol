@@ -66,6 +66,7 @@ export interface RecommendationCard {
   productId: string;
   retailer: string;
   productName: string;
+  imageUrl?: string;
   sourceUrl?: string;
   sourceType?: "search" | "detail" | "network" | "historical";
   brand?: string;
@@ -141,6 +142,7 @@ export interface FavoriteProductSummary {
   productId: string;
   retailer: string;
   canonicalName: string;
+  imageUrl?: string;
   brand?: string;
   packLabel?: string;
   lastPrice: number;
@@ -200,6 +202,7 @@ interface RawRankedProduct {
     id: string;
     retailer: string;
     sourceUrl: string;
+    imageUrl?: string;
     canonicalDisplayName: string;
     sourceType: "search" | "detail" | "network" | "historical";
     brand?: string;
@@ -416,6 +419,7 @@ export class ApiClient {
           retailer: card.retailer,
           sourceUrl: card.sourceUrl ?? "",
           sourceType: card.sourceType ?? "historical",
+          imageUrl: card.imageUrl,
           canonicalDisplayName: card.productName,
           rawName: card.productName,
           brand: card.brand,
@@ -518,18 +522,24 @@ export class ApiClient {
   }
 
   private toSingleCompareResponse(response: RawItemComparisonResult): SingleCompareResponse {
+    const recommended = response.recommended ? this.toRecommendationCard(response.recommended) : undefined;
+    const alternatives = response.alternatives.map((candidate) => this.toRecommendationCard(candidate));
+    const surfacedRetailers = new Set(
+      [recommended, ...alternatives].filter((candidate): candidate is RecommendationCard => Boolean(candidate)).map((candidate) => candidate.retailer)
+    );
+
     return {
       query: response.query,
       mode: response.comparisonMode,
       location: response.location,
-      recommended: response.recommended ? this.toRecommendationCard(response.recommended) : undefined,
-      alternatives: response.alternatives.map((candidate) => this.toRecommendationCard(candidate)),
+      recommended,
+      alternatives,
       notes: response.warnings.map((message) => ({ kind: "warning" as const, message })),
       retailerHealth: response.retailerStatus.map((status) => ({
         retailer: status.retailer,
         status: status.health.status,
         lastSuccessAt: status.health.lastSuccessfulRetrieval,
-        detail: [...status.warnings, status.health.recentFailure].filter(Boolean).join(" | ") || undefined
+        detail: buildRetailerHealthDetail(status, surfacedRetailers)
       })),
       comparedAt: response.generatedAt
     };
@@ -598,6 +608,7 @@ export class ApiClient {
       productId: candidate.product.id,
       retailer: candidate.product.retailer,
       productName: candidate.product.canonicalDisplayName,
+      imageUrl: candidate.product.imageUrl,
       sourceUrl: candidate.product.sourceUrl,
       sourceType: candidate.product.sourceType,
       brand: candidate.product.brand,
@@ -689,4 +700,17 @@ function parseUnitPriceLabel(unitPrice: string | undefined) {
     unit: match[2].trim(),
     inferred: false
   };
+}
+
+function buildRetailerHealthDetail(
+  status: RawItemComparisonResult["retailerStatus"][number],
+  surfacedRetailers: Set<string>
+): string | undefined {
+  const details = [...status.warnings, status.health.recentFailure].filter((value): value is string => Boolean(value));
+
+  if (status.health.status === "healthy" && !surfacedRetailers.has(status.retailer)) {
+    details.push("No comparable result surfaced for this query.");
+  }
+
+  return details.join(" | ") || undefined;
 }

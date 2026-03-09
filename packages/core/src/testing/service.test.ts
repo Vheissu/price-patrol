@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PricePatrolService } from "../comparison/service.js";
-import type { RetailerAdapter } from "../adapters/base.js";
-import type { NormalizedProduct } from "../types/domain.js";
+import { BaseRetailerAdapter, type RetailerAdapter } from "../adapters/base.js";
+import type { NormalizedProduct, SearchIntent, SearchOptions } from "../types/domain.js";
 
 const now = new Date().toISOString();
 
@@ -187,5 +187,71 @@ describe("PricePatrolService", () => {
     const result = await service.compareItem("Pepsi Max 24 pack", "equivalent", { allowLiveScrape: false });
     expect(result.recommended).toBeDefined();
     expect(result.warnings.some((warning) => warning.includes("No direct pepsi max match"))).toBe(true);
+  });
+
+  it("uses fallback search families when a retailer only returns generic substitutes", async () => {
+    class AldiFallbackAdapter extends BaseRetailerAdapter {
+      constructor() {
+        super("aldi");
+      }
+
+      protected async searchLive(intent: SearchIntent, _options: SearchOptions): Promise<NormalizedProduct[]> {
+        if (intent.normalizedQuery !== "zero sugar cola 30 pack") {
+          return [];
+        }
+
+        return [
+          product({
+            id: "aldi:cola-zero-30",
+            retailer: "aldi",
+            canonicalDisplayName: "Cola Zero Cans 30 Pack",
+            rawName: "Cola Zero Cans 30 Pack",
+            brand: "Cola Zero",
+            shelfPrice: 18,
+            effectiveComparisonPrice: 18,
+            packSize: { value: 30, unit: "each", totalQuantity: 30, comparableUnitType: "count" }
+          })
+        ];
+      }
+    }
+
+    const service = new PricePatrolService([new AldiFallbackAdapter()]);
+    const result = await service.compareItem("Pepsi Max 30 cans", "equivalent", { allowLiveScrape: true });
+
+    expect(result.recommended?.product.id).toBe("aldi:cola-zero-30");
+    expect(result.retailerStatus[0]?.warnings.some((warning) => warning.includes('Used related search "zero sugar cola 30 pack"'))).toBe(true);
+  });
+
+  it("uses fallback search families for energy drink substitutes", async () => {
+    class AldiEnergyAdapter extends BaseRetailerAdapter {
+      constructor() {
+        super("aldi");
+      }
+
+      protected async searchLive(intent: SearchIntent, _options: SearchOptions): Promise<NormalizedProduct[]> {
+        if (intent.normalizedQuery !== "energy drink 4 pack") {
+          return [];
+        }
+
+        return [
+          product({
+            id: "aldi:flying-power-4",
+            retailer: "aldi",
+            canonicalDisplayName: "Flying Power Energy Drink 4 Pack",
+            rawName: "Flying Power Energy Drink 4 Pack",
+            brand: "Flying Power",
+            shelfPrice: 6.99,
+            effectiveComparisonPrice: 6.99,
+            packSize: { value: 4, unit: "each", totalQuantity: 4, comparableUnitType: "count" }
+          })
+        ];
+      }
+    }
+
+    const service = new PricePatrolService([new AldiEnergyAdapter()]);
+    const result = await service.compareItem("Red Bull 4 pack", "equivalent", { allowLiveScrape: true });
+
+    expect(result.recommended?.product.id).toBe("aldi:flying-power-4");
+    expect(result.retailerStatus[0]?.warnings.some((warning) => warning.includes('Used related search "energy drink 4 pack"'))).toBe(true);
   });
 });

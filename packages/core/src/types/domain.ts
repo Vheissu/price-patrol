@@ -53,6 +53,7 @@ export interface NormalizedProduct {
   retailerProductId?: string;
   sourceUrl: string;
   sourceType: SourceType;
+  imageUrl?: string;
   storeContext?: LocationContext;
   canonicalDisplayName: string;
   rawName: string;
@@ -89,6 +90,11 @@ export interface SearchIntent {
   normalizedQuery: string;
   comparisonMode: ComparisonMode;
   coreType: string;
+  familyTerms: string[];
+  substituteTerms: string[];
+  fallbackQueries: string[];
+  requiredMatchTerms: string[];
+  excludedMatchTerms: string[];
   variantTerms: string[];
   attributeTerms: string[];
   excludedTerms: string[];

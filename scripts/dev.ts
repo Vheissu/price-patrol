@@ -70,15 +70,11 @@ async function main() {
 
     shuttingDown = true;
     for (const child of children) {
-      if (!child.killed) {
-        child.kill("SIGTERM");
-      }
+      terminateChildTree(child, "SIGTERM");
     }
     setTimeout(() => {
       for (const child of children) {
-        if (!child.killed) {
-          child.kill("SIGKILL");
-        }
+        terminateChildTree(child, "SIGKILL");
       }
     }, 2_000).unref();
     process.exitCode = exitCode;
@@ -86,6 +82,7 @@ async function main() {
 
   process.on("SIGINT", () => shutdown(130));
   process.on("SIGTERM", () => shutdown(143));
+  process.on("exit", () => shutdown(process.exitCode ?? 0));
 
   for (const definition of processes) {
     const child = spawn(definition.command, definition.args, {
@@ -94,7 +91,8 @@ async function main() {
         ...process.env,
         ...definition.env
       },
-      stdio: ["inherit", "pipe", "pipe"]
+      stdio: ["inherit", "pipe", "pipe"],
+      detached: process.platform !== "win32"
     });
 
     children.push(child);
@@ -184,6 +182,30 @@ function isPortAvailable(port: number, host: string): Promise<boolean> {
       server.close(() => resolve(true));
     });
   });
+}
+
+function terminateChildTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (child.exitCode != null || child.signalCode != null) {
+    return;
+  }
+
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+      stdio: "ignore"
+    });
+    killer.unref();
+    return;
+  }
+
+  try {
+    process.kill(-child.pid!, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // Best-effort cleanup only.
+    }
+  }
 }
 
 main().catch((error) => {

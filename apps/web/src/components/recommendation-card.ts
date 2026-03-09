@@ -22,4 +22,16 @@ export class RecommendationCardElement {
     }
     return `${Math.round(this.card.confidenceScore * 100)}%`;
   }
+
+  get retailerLogoUrl(): string {
+    return this.card ? `/retailers/${this.card.retailer}.svg` : "";
+  }
+
+  get retailerLabel(): string {
+    if (!this.card) {
+      return "";
+    }
+
+    return this.card.retailer === "aldi" ? "ALDI" : this.card.retailer.charAt(0).toUpperCase() + this.card.retailer.slice(1);
+  }
 }

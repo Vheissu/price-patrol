@@ -6,6 +6,7 @@ export function buildProductFromScrape(input: {
   productId?: string;
   sourceUrl: string;
   sourceType: SourceType;
+  imageUrl?: string;
   rawName: string;
   brand?: string;
   unitPriceText?: string | null;
@@ -33,6 +34,7 @@ export function buildProductFromScrape(input: {
     retailerProductId: input.productId,
     sourceUrl: input.sourceUrl,
     sourceType: input.sourceType,
+    imageUrl: input.imageUrl,
     storeContext: input.storeContext,
     canonicalDisplayName: input.rawName.replace(/\s+/g, " ").trim(),
     rawName: input.rawName,

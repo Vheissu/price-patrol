@@ -11,6 +11,10 @@ type WoolworthsResult = {
   DisplayName?: string;
   Brand?: string;
   UrlFriendlyName?: string;
+  SmallImageFile?: string;
+  MediumImageFile?: string;
+  LargeImageFile?: string;
+  DetailsImagePaths?: string[];
   Price?: number;
   WasPrice?: number;
   CupString?: string;
@@ -37,6 +41,7 @@ type WoolworthsSearchState = {
 type WoolworthsDomCard = {
   href: string;
   name: string;
+  imageUrl?: string | null;
   priceText?: string | null;
   unitPriceText?: string | null;
   promotionText?: string | null;
@@ -48,16 +53,19 @@ export class WoolworthsAdapter extends BaseRetailerAdapter {
   }
 
   protected async searchLive(intent: SearchIntent, options: SearchOptions): Promise<NormalizedProduct[]> {
+    const searchUrl = `https://www.woolworths.com.au/shop/search/products?searchTerm=${encodeURIComponent(intent.rawQuery)}`;
     const retailerConfig = await getRetailerConfig(this.retailer);
 
     return withBrowserPage({ retailer: this.retailer, location: options.location }, async (page) => {
       await navigateLikeUser(page, "https://www.woolworths.com.au/");
       await clearAndType(page, "#wx-headerSearch", intent.rawQuery);
       await humanDelay();
-      await Promise.allSettled([
-        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }),
-        page.click("#wx-button-header-search-find")
-      ]);
+      await page.click("#wx-button-header-search-find");
+      const reachedSearchPage = await waitForWoolworthsSearchPage(page);
+      if (!reachedSearchPage) {
+        await navigateLikeUser(page, searchUrl);
+      }
+
       await page.waitForFunction(() => {
         const data = (window as Window & { wowDataLayer?: { searchResults?: unknown } }).wowDataLayer?.searchResults;
         return Boolean(data);
@@ -65,6 +73,20 @@ export class WoolworthsAdapter extends BaseRetailerAdapter {
         timeout: 30_000
       });
       await humanDelay();
+
+      const imageMap = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('a[href*="/shop/productdetails/"]')).reduce<Record<string, string>>((acc, link) => {
+          const href = link.getAttribute("href") ?? "";
+          const stockcode = href.match(/productdetails\/(\d+)/i)?.[1];
+          const container = link.closest("article, li, div, section");
+          const image = container?.querySelector("img");
+          const imageUrl = image?.getAttribute("src") ?? image?.getAttribute("data-src");
+          if (stockcode && imageUrl && !acc[stockcode]) {
+            acc[stockcode] = imageUrl;
+          }
+          return acc;
+        }, {});
+      });
 
       const data = await page.evaluate(() => {
         const wowDataLayer = (window as Window & { wowDataLayer?: Record<string, unknown> }).wowDataLayer;
@@ -85,6 +107,7 @@ export class WoolworthsAdapter extends BaseRetailerAdapter {
               productId: String(result.Stockcode ?? result.UrlFriendlyName ?? displayName),
               sourceUrl: buildWoolworthsSourceUrl(result, displayName),
               sourceType: "network",
+              imageUrl: resolveWoolworthsImageUrl(result, imageMap[String(result.Stockcode ?? "")]),
               rawName: displayName,
               brand: result.Brand,
               shelfPrice: result.Price,
@@ -108,12 +131,13 @@ export class WoolworthsAdapter extends BaseRetailerAdapter {
 
       const rawCards = await page.evaluate(() => {
         const links = Array.from(document.querySelectorAll('a[href*="/shop/productdetails/"]'));
-        const cards: Array<{
-          href: string;
-          name: string;
-          priceText?: string | null;
-          unitPriceText?: string | null;
-          promotionText?: string | null;
+          const cards: Array<{
+            href: string;
+            name: string;
+            imageUrl?: string | null;
+            priceText?: string | null;
+            unitPriceText?: string | null;
+            promotionText?: string | null;
         }> = [];
         const seen = new Set<string>();
 
@@ -128,10 +152,12 @@ export class WoolworthsAdapter extends BaseRetailerAdapter {
           seen.add(href);
           const container = link.closest("article, li, div, section");
           const text = container?.textContent ?? "";
+          const image = container?.querySelector("img");
+          const imageUrl = image?.getAttribute("src") ?? image?.getAttribute("data-src") ?? null;
           const priceText = text.match(/\$\d+(?:\.\d{1,2})?/)?.[0] ?? null;
           const unitPriceText = text.match(/\$\d+(?:\.\d{1,2})?\s*\/\s*(?:100g|1kg|100ml|1l|1each)/i)?.[0] ?? null;
           const promotionText = text.match(/save \$\d+(?:\.\d{1,2})?|was \$\d+(?:\.\d{1,2})?/i)?.[0] ?? null;
-          cards.push({ href, name, priceText, unitPriceText, promotionText });
+          cards.push({ href, name, imageUrl, priceText, unitPriceText, promotionText });
         }
 
         return cards;
@@ -233,6 +259,7 @@ function mapWoolworthsDomCard(card: WoolworthsDomCard, options: SearchOptions): 
     productId: productIdMatch?.[1] ?? sourceUrl.split("/").pop(),
     sourceUrl,
     sourceType: "search",
+    imageUrl: normalizeRetailerImageUrl(card.imageUrl, "https://www.woolworths.com.au"),
     rawName: card.name,
     shelfPriceText: card.priceText,
     unitPriceText: card.unitPriceText,
@@ -256,6 +283,36 @@ function stripHtml(value?: string | null): string | undefined {
   return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function resolveWoolworthsImageUrl(result: WoolworthsResult, fallbackImageUrl?: string): string | undefined {
+  return normalizeRetailerImageUrl(
+    result.LargeImageFile ?? result.MediumImageFile ?? result.SmallImageFile ?? result.DetailsImagePaths?.[0] ?? fallbackImageUrl,
+    "https://assets.woolworths.com.au"
+  );
+}
+
+function normalizeRetailerImageUrl(value: string | null | undefined, baseUrl: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    return value;
+  }
+
+  if (value.startsWith("//")) {
+    return `https:${value}`;
+  }
+
+  return value.startsWith("/") ? `${baseUrl}${value}` : `${baseUrl}/${value}`;
+}
+
 function slugify(value: string): string {
   return normalizeText(value).replace(/\s+/g, "-");
+}
+
+async function waitForWoolworthsSearchPage(page: import("puppeteer").Page): Promise<boolean> {
+  return page
+    .waitForFunction(() => location.pathname.startsWith("/shop/search"), { timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
 }

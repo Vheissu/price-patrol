@@ -1,5 +1,5 @@
-import { route } from "@aurelia/router";
-import { customElement } from "aurelia";
+import { IRouter, route } from "@aurelia/router";
+import { customElement, resolve } from "aurelia";
 import template from "./app.html?raw";
 
 @route({
@@ -27,6 +27,8 @@ import template from "./app.html?raw";
 })
 @customElement({ name: "price-patrol-app", template })
 export class PricePatrolApp {
+  private readonly router = resolve(IRouter);
+
   readonly navigation = [
     { label: "Compare", route: "/compare", eyebrow: "Single item" },
     { label: "Basket", route: "/basket", eyebrow: "Whole trolley" },
@@ -38,4 +40,8 @@ export class PricePatrolApp {
     "Retailer confidence surfaced",
     "Freshness and caveats always visible"
   ];
+
+  navigate(route: string): void {
+    void this.router.load(route);
+  }
 }

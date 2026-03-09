@@ -6,6 +6,7 @@ export interface FavoriteProduct {
   productId: string;
   retailer: string;
   canonicalName: string;
+  imageUrl?: string;
   brand?: string;
   packLabel?: string;
   lastPrice: number;
@@ -148,10 +149,12 @@ export async function getFavorites(): Promise<FavoriteProduct[]> {
     last_price: number;
     unit_price_label?: string | null;
     created_at: string;
+    metadata_json: string;
     updated_at: string;
   }>;
 
   return rows.map((row) => ({
+    ...(parseFavoriteMetadata(row.metadata_json) ?? {}),
     productId: row.product_id,
     retailer: row.retailer,
     canonicalName: row.canonical_name,
@@ -171,6 +174,7 @@ export async function saveFavorite(product: NormalizedProduct): Promise<Favorite
   const unitPriceLabel = product.unitPrice ? `$${product.unitPrice.value.toFixed(2)} / ${product.unitPrice.unit}` : undefined;
   const metadata = JSON.stringify({
     sourceUrl: product.sourceUrl,
+    imageUrl: product.imageUrl,
     promotionText: product.promotionText,
     priceIntelligence: product.priceIntelligence
   });
@@ -207,6 +211,7 @@ export async function saveFavorite(product: NormalizedProduct): Promise<Favorite
     productId: product.id,
     retailer: product.retailer,
     canonicalName: product.canonicalDisplayName,
+    imageUrl: product.imageUrl,
     brand: product.brand,
     packLabel: pack,
     lastPrice: product.effectiveComparisonPrice,
@@ -382,4 +387,15 @@ function mapMatchPreferenceRow(row: MatchPreferenceRow): MatchPreference {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+function parseFavoriteMetadata(metadataJson: string): { imageUrl?: string } | undefined {
+  try {
+    const metadata = JSON.parse(metadataJson) as { imageUrl?: string };
+    return {
+      imageUrl: metadata.imageUrl
+    };
+  } catch {
+    return undefined;
+  }
 }

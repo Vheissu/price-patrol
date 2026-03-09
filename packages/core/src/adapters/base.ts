@@ -1,5 +1,6 @@
 import { SqliteCache } from "../cache/sqlite-cache.js";
 import { getProjectConfig, getRetailerConfig } from "../config/project-config.js";
+import { normalizeText } from "../parsing/query.js";
 import { AdapterHealth, AdapterSearchResult, NormalizedProduct, RetailerId, SearchIntent, SearchOptions } from "../types/domain.js";
 import { getHistoricalFallbackProducts } from "./shared/historical-catalog.js";
 import { asScrapeFailure, runWithResilience } from "./shared/resilience.js";
@@ -51,10 +52,10 @@ export abstract class BaseRetailerAdapter implements RetailerAdapter {
       warnings.push("Retailer is disabled in price-patrol.toml.");
     } else if (allowLiveScrape) {
       try {
-        products = await runWithResilience<NormalizedProduct[]>({
-          retailer: this.retailer,
-          task: () => this.searchLive(intent, options)
-        });
+        const liveSearch = await this.searchLiveWithFallbacks(intent, options);
+        products = liveSearch.products;
+        warnings.push(...liveSearch.warnings);
+        diagnostics.push(...liveSearch.diagnostics);
         if (products.length) {
           this.health = {
             ...this.health,
@@ -116,6 +117,54 @@ export abstract class BaseRetailerAdapter implements RetailerAdapter {
     return result;
   }
 
+  protected async searchLiveWithFallbacks(
+    intent: SearchIntent,
+    options: SearchOptions
+  ): Promise<Pick<AdapterSearchResult, "products" | "warnings" | "diagnostics">> {
+    const attemptedQueries = new Set<string>();
+    const diagnostics: string[] = [];
+    const warnings: string[] = [];
+
+    const searchIntents = [
+      intent,
+      ...intent.fallbackQueries.map((query) => ({
+        ...intent,
+        rawQuery: query,
+        normalizedQuery: query
+      }))
+    ];
+
+    for (const candidateIntent of searchIntents) {
+      if (attemptedQueries.has(candidateIntent.normalizedQuery)) {
+        continue;
+      }
+      attemptedQueries.add(candidateIntent.normalizedQuery);
+
+      const products = await runWithResilience<NormalizedProduct[]>({
+        retailer: this.retailer,
+        task: () => this.searchLive(candidateIntent, options)
+      });
+
+      if (products.length && hasRelevantResults(products, intent)) {
+        if (candidateIntent.normalizedQuery !== intent.normalizedQuery) {
+          warnings.push(`Used related search "${candidateIntent.rawQuery}" to find substitute options.`);
+          diagnostics.push(`Live search fallback query succeeded: ${candidateIntent.rawQuery}`);
+        }
+        return { products, warnings, diagnostics };
+      }
+
+      if (products.length) {
+        diagnostics.push(`Live search query returned unrelated products: ${candidateIntent.rawQuery}`);
+      }
+
+      if (candidateIntent.normalizedQuery !== intent.normalizedQuery) {
+        diagnostics.push(`Live search fallback query returned no products: ${candidateIntent.rawQuery}`);
+      }
+    }
+
+    return { products: [], warnings, diagnostics };
+  }
+
   getHealth(): AdapterHealth {
     return this.health;
   }
@@ -142,4 +191,41 @@ function shouldCacheResult(result: AdapterSearchResult): boolean {
   }
 
   return result.products.some((product) => product.sourceType !== "historical");
+}
+
+function hasRelevantResults(products: NormalizedProduct[], intent: SearchIntent): boolean {
+  const relevanceTerms = Array.from(
+    new Set(
+      [intent.coreType, ...intent.familyTerms, ...intent.substituteTerms]
+        .map((term) => normalizeText(term))
+        .filter(Boolean)
+    )
+  );
+
+  if (!relevanceTerms.length) {
+    return products.length > 0;
+  }
+
+  return products.some((product) => {
+    const haystack = normalizeText(
+      [
+        product.canonicalDisplayName,
+        product.rawName,
+        product.brand,
+        product.structuredAttributes.join(" ")
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+    if (intent.requiredMatchTerms.length && !intent.requiredMatchTerms.some((term) => haystack.includes(term))) {
+      return false;
+    }
+
+    if (intent.excludedMatchTerms.some((term) => haystack.includes(term))) {
+      return false;
+    }
+
+    return relevanceTerms.some((term) => haystack.includes(term));
+  });
 }

@@ -1,4 +1,5 @@
 import { SearchIntent, ComparisonMode, ParsedSize, ComparableUnitType, FreshnessLevel } from "../types/domain.js";
+import { deriveSemanticTerms } from "./substitutions.js";
 
 const ATTRIBUTE_TERMS = [
   "plain",
@@ -25,6 +26,36 @@ const BRANDS = [
   "aldi",
   "pepsi max",
   "pepsi",
+  "coke zero",
+  "coke no sugar",
+  "coca cola zero sugar",
+  "coca cola",
+  "sprite",
+  "solo",
+  "fanta",
+  "red bull",
+  "monster",
+  "mother",
+  "v energy",
+  "colgate",
+  "sensodyne",
+  "panadol",
+  "nurofen",
+  "listerine",
+  "savacol",
+  "glen 20",
+  "windex",
+  "doritos",
+  "cc s",
+  "cc's",
+  "red rock deli",
+  "kettle",
+  "pringles",
+  "weet bix",
+  "weet-bix",
+  "coco pops",
+  "nutri grain",
+  "nutri-grain",
   "suimin",
   "essentials",
   "white wings",
@@ -34,7 +65,8 @@ const BRANDS = [
   "brooklea"
 ];
 
-const COUNT_TERMS = new Set(["pack", "pk", "count", "each"]);
+const COUNT_TERMS = new Set(["pack", "pk", "count", "each", "can", "cans", "bottle", "bottles"]);
+const GENERIC_NOUNS = new Set(["food", "item", "product", "goods", "groceries"]);
 
 export function normalizeText(value: string): string {
   return value
@@ -90,7 +122,7 @@ export function parsePackSize(input: string): ParsedSize | undefined {
     };
   }
 
-  const simple = normalized.match(/(\d+(?:\.\d+)?)\s*(kg|g|l|ml)\b|(\d+)\s*(pack|pk|count|each|ct)\b/);
+  const simple = normalized.match(/(\d+(?:\.\d+)?)\s*(kg|g|l|ml)\b|(\d+)\s*(pack|pk|count|each|ct|can|cans|bottle|bottles)\b/);
   if (!simple) {
     return undefined;
   }
@@ -175,7 +207,7 @@ export function parseSearchIntent(query: string, comparisonMode: ComparisonMode)
 
   let coreType = normalizedQuery;
   if (desiredPackSize) {
-    coreType = coreType.replace(/\b\d+(?:\.\d+)?\s*(kg|g|l|ml|pack|pk|count|each|ct)\b/g, " ").trim();
+    coreType = coreType.replace(/\b\d+(?:\.\d+)?\s*(kg|g|l|ml|pack|pk|count|each|ct|can|cans|bottle|bottles)\b/g, " ").trim();
   }
   for (const term of attributeTerms) {
     coreType = coreType.replace(term, " ").trim();
@@ -183,17 +215,38 @@ export function parseSearchIntent(query: string, comparisonMode: ComparisonMode)
   if (brandPreference) {
     coreType = coreType.replace(brandPreference, " ").trim();
   }
-  coreType = coreType.replace(/\s+/g, " ").trim() || normalizedQuery;
+  const semanticTerms = deriveSemanticTerms({ coreType, brandPreference }, normalizedQuery, desiredPackSize);
+  coreType = semanticTerms.defaultCoreType ?? (coreType.replace(/\s+/g, " ").trim() || normalizedQuery);
+  const inferredRequiredMatchTerms = semanticTerms.requiredMatchTerms.length
+    ? semanticTerms.requiredMatchTerms
+    : inferRequiredMatchTerms(coreType);
 
   return {
     rawQuery: query,
     normalizedQuery,
     comparisonMode,
     coreType,
+    familyTerms: semanticTerms.familyTerms,
+    substituteTerms: semanticTerms.substituteTerms,
+    fallbackQueries: semanticTerms.fallbackQueries,
+    requiredMatchTerms: inferredRequiredMatchTerms,
+    excludedMatchTerms: semanticTerms.excludedMatchTerms,
     variantTerms: attributeTerms,
     attributeTerms,
     excludedTerms: [],
     brandPreference,
     desiredPackSize
   };
+}
+
+function inferRequiredMatchTerms(coreType: string): string[] {
+  const tokens = normalizeText(coreType)
+    .split(" ")
+    .filter((token) => token.length > 2 && !GENERIC_NOUNS.has(token));
+
+  if (!tokens.length) {
+    return [];
+  }
+
+  return [tokens[tokens.length - 1]];
 }

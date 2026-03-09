@@ -26,17 +26,56 @@
         <label class="field-shell">
           <span class="field-label">Comparison mode</span>
           <select value.bind="mode" class="field-input">
-            <option repeat.for="modeOption of modes" model.bind="modeOption">${modeOption}</option>
+            <option repeat.for="modeOption of modeOptions" model.bind="modeOption.value">${modeOption.label}</option>
           </select>
         </label>
         <button class="action-button action-button--secondary mt-auto" click.trigger="compareBasket()" disabled.bind="isSubmitting">
           ${isSubmitting ? 'Pricing…' : 'Price basket'}
         </button>
       </div>
+      <p class="mt-3 text-sm muted-copy">${selectedModeDetail}</p>
 
       <div if.bind="error" class="mt-4 error-box">
         ${error}
       </div>
+    </section-shell>
+
+    <section-shell
+      heading="List tools"
+      subheading="Reusable shopping lists"
+      aside="Most households will keep one main shopping list, but the same flow supports multiple named lists when you need them."
+    >
+      <div class="grid gap-4 md:grid-cols-[1fr_auto]">
+        <label class="field-shell">
+          <span class="field-label">Saved list</span>
+          <select value.bind="selectedListId" change.trigger="handleSelectedListChange()" class="field-input">
+            <option value="">New shopping list</option>
+            <option repeat.for="list of savedLists" model.bind="list.id">${list.name}</option>
+          </select>
+        </label>
+        <button class="action-button action-button--secondary md:mt-auto" disabled.bind="!selectedListId" click.trigger="loadSelectedList()">
+          Load list
+        </button>
+      </div>
+
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        <label class="field-shell">
+          <span class="field-label">List name</span>
+          <input value.bind="listName" class="field-input" placeholder="Shopping list" />
+        </label>
+        <label class="field-shell">
+          <span class="field-label">Description</span>
+          <input value.bind="listDescription" class="field-input" placeholder="Weekly staples" />
+        </label>
+      </div>
+
+      <div class="mt-4 flex flex-wrap gap-3">
+        <button class="action-button" disabled.bind="isSavingList" click.trigger="saveCurrentList()">
+          ${isSavingList ? 'Saving...' : (selectedListId ? 'Update list' : 'Save as list')}
+        </button>
+      </div>
+
+      <p if.bind="listMessage" class="mt-3 text-sm muted-copy">${listMessage}</p>
     </section-shell>
 
     <section-shell

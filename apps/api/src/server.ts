@@ -23,6 +23,7 @@ import {
   recordBasketComparison,
   recordItemComparison
 } from "./intelligence.js";
+import { cacheImagesForBasketComparison, cacheImagesForItemComparison, getCachedImageAsset, readCachedImage } from "./image-cache.js";
 import {
   deleteFavorite,
   deleteList,
@@ -86,6 +87,7 @@ const favoriteSchema = z.object({
     retailer: z.enum(["coles", "woolworths", "aldi"]),
     sourceUrl: z.string().min(1),
     sourceType: z.enum(["search", "detail", "network", "historical"]),
+    imageUrl: z.string().optional(),
     canonicalDisplayName: z.string().min(1),
     rawName: z.string().min(1),
     brand: z.string().optional(),
@@ -200,7 +202,8 @@ app.post("/api/compare/item", async (request, reply) => {
     preferredProductIds
   });
   await recordItemComparison(result);
-  return enrichItemComparison(result);
+  const enriched = await enrichItemComparison(result);
+  return cacheImagesForItemComparison(enriched);
 });
 
 app.post("/api/compare/basket", async (request, reply) => {
@@ -223,7 +226,8 @@ app.post("/api/compare/basket", async (request, reply) => {
     preferredProductIds
   });
   await recordBasketComparison(result);
-  return enrichBasketComparison(result);
+  const enriched = await enrichBasketComparison(result);
+  return cacheImagesForBasketComparison(enriched);
 });
 
 app.post("/api/explain/item", async (request, reply) => {
@@ -352,6 +356,21 @@ app.get("/api/products/:productId/history", async (request, reply) => {
     productId: params.data.productId,
     history: await getProductHistory(params.data.productId, query.data.days ?? 60)
   };
+});
+
+app.get("/api/assets/product-images/:cacheKey", async (request, reply) => {
+  const params = z.object({ cacheKey: z.string().min(8) }).safeParse(request.params);
+  if (!params.success) {
+    return reply.status(400).send({ message: "Invalid image asset request." });
+  }
+
+  const asset = getCachedImageAsset(params.data.cacheKey);
+  if (!asset) {
+    return reply.notFound("Image asset not found.");
+  }
+
+  reply.header("Cache-Control", "public, max-age=2592000, immutable");
+  return reply.type(asset.contentType ?? "application/octet-stream").send(readCachedImage(asset.localPath));
 });
 
 const requestedPort = Number(process.env.PORT ?? 8787);

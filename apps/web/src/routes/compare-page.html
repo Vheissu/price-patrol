@@ -5,7 +5,7 @@
       <div class="search-bar">
         <input value.bind="query" class="search-input" placeholder="What are you looking for? e.g. full cream milk 2L" />
         <button class="search-button" disabled.bind="isSubmitting">
-          ${isSubmitting ? 'Comparing\u2026' : 'Compare'}
+          ${isSubmitting ? 'Comparing...' : 'Compare'}
         </button>
       </div>
       <div class="search-options">
@@ -17,12 +17,43 @@
         <div class="option-group">
           <span class="option-label">Mode</span>
           <select value.bind="mode" class="option-input">
-            <option repeat.for="modeOption of modes" model.bind="modeOption">${modeOption}</option>
+            <option repeat.for="modeOption of modeOptions" model.bind="modeOption.value">${modeOption.label}</option>
           </select>
         </div>
       </div>
+      <div class="soft-panel">
+        <p class="eyebrow">Match mode</p>
+        <p class="mt-2 text-sm muted-copy">${selectedModeDetail}</p>
+      </div>
     </form>
     <div if.bind="error" class="error-box mt-3">${error}</div>
+  </section>
+
+  <section if.bind="isSubmitting" class="progress-panel animate-in">
+    <div class="progress-panel__header">
+      <div>
+        <p class="section-label">Live comparison</p>
+        <h2 class="progress-panel__title">Checking stores and ranking the best match</h2>
+      </div>
+      <div class="progress-retailers">
+        <div repeat.for="retailer of retailerSequence" class="progress-retailer">
+          <img class="progress-retailer__logo" src.bind="retailer.logoUrl" alt.bind="retailer.label" />
+          <span>${retailer.label}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="progress-steps">
+      <div repeat.for="item of progressItems" class.bind="progressItemClass(item)">
+        <div class="progress-step__marker" aria-label.bind="progressMarkerLabel(item)">
+          <span class="progress-step__marker-glyph">${progressMarkerSymbol(item)}</span>
+        </div>
+        <div>
+          <p class="progress-step__title">${item.title}</p>
+          <p class="progress-step__detail">${item.detail}</p>
+        </div>
+      </div>
+    </div>
   </section>
 
   <div if.bind="result" class="flex flex-col gap-6 animate-in">
@@ -32,21 +63,32 @@
 
       <div class="hero-actions">
         <button class="compact-btn" disabled.bind="isSavingFavorite" click.trigger="saveFavorite()">
-          &#9825; ${isSavingFavorite ? 'Saving\u2026' : 'Favorite'}
+          ${isSavingFavorite ? 'Saving...' : 'Favorite'}
         </button>
         <button class="compact-btn" disabled.bind="isSavingCorrection" click.trigger="saveMatchPreference()">
-          &#10003; ${isSavingCorrection ? 'Saving\u2026' : 'Prefer this'}
+          ${isSavingCorrection ? 'Saving...' : 'Prefer this'}
         </button>
         <div class="watch-group">
           <input value.bind="targetPriceText" class="watch-input" placeholder="Target $" />
           <button class="compact-btn" disabled.bind="isSavingWatchlist" click.trigger="saveWatchlist()">
-            ${isSavingWatchlist ? '\u2026' : 'Watch'}
+            ${isSavingWatchlist ? 'Saving...' : 'Watch'}
+          </button>
+        </div>
+        <div class="watch-group">
+          <select value.bind="selectedListId" class="watch-input min-w-40">
+            <option value="">Shopping list</option>
+            <option repeat.for="list of savedLists" model.bind="list.id">${list.name}</option>
+          </select>
+          <button class="compact-btn" disabled.bind="isSavingList" click.trigger="addToList()">
+            ${isSavingList ? 'Saving...' : 'Add to list'}
           </button>
         </div>
       </div>
+      <p if.bind="mode !== 'exact'" class="feedback-msg">Flexible and Best value modes can surface substitutes. Use Exact brand + pack when you only want the named product.</p>
       <p if.bind="favoriteMessage" class="feedback-msg">${favoriteMessage}</p>
       <p if.bind="correctionMessage" class="feedback-msg">${correctionMessage}</p>
       <p if.bind="watchlistMessage" class="feedback-msg">${watchlistMessage}</p>
+      <p if.bind="listMessage" class="feedback-msg">${listMessage}</p>
     </section>
 
     <section if.bind="result.alternatives.length">
@@ -61,7 +103,7 @@
     <div if.bind="selectedCard?.priceIntelligence" class="flex flex-col">
       <button class="collapsible-trigger" click.trigger="showPriceIntel = !showPriceIntel">
         Price intelligence
-        <span class="collapsible-chevron" class.open.bind="showPriceIntel">&#x203A;</span>
+        <span class="collapsible-chevron" class.open.bind="showPriceIntel">&gt;</span>
       </button>
       <div if.bind="showPriceIntel" class="collapsible-content">
         <div class="intel-grid">
@@ -85,7 +127,7 @@
     <div class="flex flex-col">
       <button class="collapsible-trigger" click.trigger="showExplanation = !showExplanation">
         Why this was recommended
-        <span class="collapsible-chevron" class.open.bind="showExplanation">&#x203A;</span>
+        <span class="collapsible-chevron" class.open.bind="showExplanation">&gt;</span>
       </button>
       <div if.bind="showExplanation" class="collapsible-content">
         <explanation-panel
@@ -99,7 +141,7 @@
     <div if.bind="result.notes.length" class="flex flex-col">
       <button class="collapsible-trigger" click.trigger="showNotes = !showNotes">
         Notes &amp; warnings &middot; ${result.notes.length}
-        <span class="collapsible-chevron" class.open.bind="showNotes">&#x203A;</span>
+        <span class="collapsible-chevron" class.open.bind="showNotes">&gt;</span>
       </button>
       <div if.bind="showNotes" class="collapsible-content space-y-3">
         <div repeat.for="note of result.notes" class="soft-panel">
