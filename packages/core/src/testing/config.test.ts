@@ -5,6 +5,7 @@ describe("config schema defaults", () => {
   it("fills missing values with safe defaults", () => {
     const config = parseProjectConfig({});
     expect(config.browser.headless).toBe(true);
+    expect(config.browser.protocolTimeoutMs).toBe(120_000);
     expect(config.browser.minHumanDelayMs).toBe(150);
     expect(config.cache.liveScrapeEnabled).toBe(true);
     expect(config.cache.useHistoricalFallbackOnFailure).toBe(true);

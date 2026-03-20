@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { extractAldiSearchResults } from "../adapters/aldi-adapter.js";
-import { extractColesResults } from "../adapters/coles-adapter.js";
+import { buildAldiSearchQueries, extractAldiSearchResults } from "../adapters/aldi-adapter.js";
+import { buildColesLocationSearchTerms, extractColesResults, scoreColesLocationOption } from "../adapters/coles-adapter.js";
 import { extractWoolworthsResults } from "../adapters/woolworths-adapter.js";
+import { parseSearchIntent } from "../parsing/query.js";
 
 describe("retailer adapter parsers", () => {
   it("extracts Coles product results from __NEXT_DATA__", () => {
@@ -104,5 +105,35 @@ describe("retailer adapter parsers", () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.sku).toBe("000000000000400054");
     expect(results[0]?.price?.amountRelevant).toBe(125);
+  });
+
+  it("builds ALDI search queries with a semantic retailer-friendly fallback first", () => {
+    const intent = parseSearchIntent("Coke Zero 30 cans", "equivalent");
+
+    expect(buildAldiSearchQueries(intent)).toEqual(["zero sugar cola 30 cans", "Coke Zero 30 cans"]);
+  });
+
+  it("builds Coles location terms with postcode-first preference", () => {
+    expect(buildColesLocationSearchTerms({ suburb: "Middle Ridge", postcode: "4350", locationText: "Middle Ridge QLD 4350" })).toEqual([
+      "4350",
+      "Middle Ridge 4350",
+      "Middle Ridge",
+      "Middle Ridge QLD 4350",
+    ]);
+  });
+
+  it("prefers exact Coles suburb and postcode matches", () => {
+    const location = {
+      suburb: "Middle Ridge",
+      postcode: "4350",
+      locationText: "Middle Ridge QLD 4350"
+    };
+
+    expect(scoreColesLocationOption("Middle Ridge, QLD 4350", location)).toBeGreaterThan(
+      scoreColesLocationOption("Athol, QLD 4350", location)
+    );
+    expect(scoreColesLocationOption("Middle Ridge, QLD 4350", location)).toBeGreaterThan(
+      scoreColesLocationOption("Middle Ridge, QLD 4300", location)
+    );
   });
 });

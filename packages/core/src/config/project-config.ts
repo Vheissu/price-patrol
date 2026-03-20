@@ -14,6 +14,7 @@ const retailerSchema = z.object({
 const browserSchema = z.object({
   headless: z.boolean().default(true),
   navigationTimeoutMs: z.number().int().positive().default(60_000),
+  protocolTimeoutMs: z.number().int().positive().default(120_000),
   stabilityDelayMs: z.number().int().nonnegative().default(1_500),
   minHumanDelayMs: z.number().int().nonnegative().default(150),
   maxHumanDelayMs: z.number().int().nonnegative().default(600),

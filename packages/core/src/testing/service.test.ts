@@ -254,4 +254,40 @@ describe("PricePatrolService", () => {
     expect(result.recommended?.product.id).toBe("aldi:flying-power-4");
     expect(result.retailerStatus[0]?.warnings.some((warning) => warning.includes('Used related search "energy drink 4 pack"'))).toBe(true);
   });
+
+  it("accepts exact brand hits without forcing fallback family terms", async () => {
+    class AldiBrandMatchAdapter extends BaseRetailerAdapter {
+      constructor() {
+        super("aldi");
+      }
+
+      protected async searchLive(intent: SearchIntent, _options: SearchOptions): Promise<NormalizedProduct[]> {
+        if (intent.normalizedQuery !== "coke zero 30 cans") {
+          return [];
+        }
+
+        return [
+          product({
+            id: "aldi:coke-zero-30",
+            retailer: "aldi",
+            canonicalDisplayName: "Coke Zero Sugar 30x375ml",
+            rawName: "Coke Zero Sugar 30x375ml",
+            brand: "Coke Zero",
+            shelfPrice: 31.99,
+            effectiveComparisonPrice: 31.99,
+            packSize: { value: 375, unit: "ml", totalQuantity: 11250, comparableUnitType: "volume", multipackQuantity: 30 }
+          })
+        ];
+      }
+    }
+
+    const service = new PricePatrolService([new AldiBrandMatchAdapter()]);
+    const result = await service.compareItem("Coke Zero 30 cans", "equivalent", {
+      allowLiveScrape: true,
+      location: { postcode: "9999" }
+    });
+
+    expect(result.recommended?.product.id).toBe("aldi:coke-zero-30");
+    expect(result.retailerStatus[0]?.warnings.some((warning) => warning.includes("Used related search"))).toBe(false);
+  });
 });

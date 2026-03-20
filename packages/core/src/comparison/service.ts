@@ -9,6 +9,7 @@ import {
   RetailerStatus,
   SearchOptions
 } from "../types/domain.js";
+import { getProjectConfig } from "../config/project-config.js";
 import { parseSearchIntent } from "../parsing/query.js";
 import { rankProducts } from "./matching.js";
 import { RetailerAdapter } from "../adapters/base.js";
@@ -18,7 +19,7 @@ export class PricePatrolService {
 
   async compareItem(query: string, comparisonMode: ComparisonMode, options: SearchOptions = {}): Promise<ItemComparisonResult> {
     const intent = parseSearchIntent(query, comparisonMode);
-    const responses = await Promise.all(this.adapters.map((adapter) => adapter.search(intent, options)));
+    const responses = await searchRetailers(this.adapters, intent, options);
     const retailerStatus: RetailerStatus[] = responses.map((response) => ({
       retailer: response.retailer,
       health: response.health,
@@ -182,4 +183,37 @@ function deriveGlobalWarnings(recommended: RankedProduct | undefined, ranked: Ra
 
 function normalizeBrand(brand?: string): string | undefined {
   return brand?.trim().toLowerCase();
+}
+
+async function searchRetailers(
+  adapters: RetailerAdapter[],
+  intent: ReturnType<typeof parseSearchIntent>,
+  options: SearchOptions
+) {
+  const config = await getProjectConfig();
+  return runWithConcurrency(adapters, config.resilience.maxConcurrentRetailerTasks, (adapter) => adapter.search(intent, options));
+}
+
+async function runWithConcurrency<T, TResult>(
+  items: T[],
+  maxConcurrency: number,
+  worker: (item: T, index: number) => Promise<TResult>
+): Promise<TResult[]> {
+  const results = new Array<TResult>(items.length);
+  let nextIndex = 0;
+
+  const runners = Array.from({ length: Math.min(Math.max(maxConcurrency, 1), items.length) }, async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) {
+        return;
+      }
+
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
 }

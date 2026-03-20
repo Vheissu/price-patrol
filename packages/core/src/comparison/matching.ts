@@ -42,6 +42,7 @@ function scoreProduct(
   const requestedCoreTokens = tokenize(intent.coreType);
   const productTokens = tokenize(productText);
   const semanticTokens = Array.from(new Set(intent.familyTerms.flatMap((term) => tokenize(term))));
+  const brandMatched = intent.brandPreference ? productText.includes(intent.brandPreference) : false;
 
   const reasons: string[] = [];
   let confidence = fuzzy(intent.coreType, productText);
@@ -63,7 +64,7 @@ function scoreProduct(
     }
   }
 
-  if (intent.requiredMatchTerms.length && !matchesAnyPhrase(productText, intent.requiredMatchTerms)) {
+  if (intent.requiredMatchTerms.length && !matchesAnyPhrase(productText, intent.requiredMatchTerms) && !brandMatched) {
     return rejected(product, "Product misses the required family-specific terms.");
   }
 
@@ -105,7 +106,7 @@ function scoreProduct(
   }
 
   if (intent.brandPreference) {
-    if (productText.includes(intent.brandPreference)) {
+    if (brandMatched) {
       confidence += 0.1;
       reasons.push("Brand preference matched.");
     } else if (intent.comparisonMode === "exact") {

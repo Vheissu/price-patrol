@@ -3,6 +3,7 @@ import { getRetailerConfig } from "../config/project-config.js";
 import { normalizeText } from "../parsing/query.js";
 import { SearchIntent, SearchOptions, NormalizedProduct } from "../types/domain.js";
 import { clearAndType, humanDelay, navigateLikeUser, withBrowserPage } from "./shared/browser.js";
+import type { BrowserPage } from "./shared/browser.js";
 import { buildProductFromScrape } from "./shared/normalize.js";
 
 type AldiSearchResponse = {
@@ -66,94 +67,108 @@ export class AldiAdapter extends BaseRetailerAdapter {
   }
 
   protected async searchLive(intent: SearchIntent, options: SearchOptions): Promise<NormalizedProduct[]> {
-    const searchUrl = `https://www.aldi.com.au/results?q=${encodeURIComponent(intent.rawQuery)}`;
     const retailerConfig = await getRetailerConfig(this.retailer);
+    const searchQueries = buildAldiSearchQueries(intent);
 
     return withBrowserPage({ retailer: this.retailer, location: options.location }, async (page) => {
-      const responsePromise = page
-        .waitForResponse(
-          (response) => response.url().includes("/v3/product-search?") && response.request().method() === "GET",
-          { timeout: 30_000 }
-        )
-        .catch(() => null);
+      for (const searchQuery of searchQueries) {
+        const responsePromise = page
+          .waitForResponse(
+            (response) => response.url().includes("/v3/product-search?") && response.request().method() === "GET",
+            { timeout: 30_000 }
+          )
+          .catch(() => null);
+        const searchUrl = `https://www.aldi.com.au/results?q=${encodeURIComponent(searchQuery)}`;
 
-      await navigateLikeUser(page, "https://www.aldi.com.au/");
-      await clearAndType(page, "#search-bar-input", intent.rawQuery);
-      await humanDelay();
-      await page.keyboard.press("Enter");
-      const reachedSearchPage = await waitForAldiSearchPage(page);
-      if (!reachedSearchPage) {
-        await navigateLikeUser(page, searchUrl);
-      }
+        await navigateLikeUser(page, "https://www.aldi.com.au/");
+        await clearAndType(page, "#search-bar-input", searchQuery);
+        await humanDelay();
+        await page.keyboard.press("Enter");
+        const reachedSearchPage = await waitForAldiSearchPage(page);
+        if (!reachedSearchPage) {
+          await navigateLikeUser(page, searchUrl);
+        }
 
-      await page.waitForSelector("main h1, [aria-label='Results']", { timeout: 30_000 }).catch(() => undefined);
-      await humanDelay();
+        await page.waitForSelector("main h1, [aria-label='Results']", { timeout: 30_000 }).catch(() => undefined);
+        await humanDelay();
 
-      const imageMap = await page.evaluate(() => {
-        return Array.from(document.querySelectorAll('a[href^="/product/"]')).reduce<Record<string, string>>((acc, link) => {
-          const href = link.getAttribute("href") ?? "";
-          const productId = href.match(/-(\d+)(?:$|[/?#])/i)?.[1];
-          const container = link.closest("section, article, li, div");
-          const image = container?.querySelector("img");
-          const imageUrl = image?.getAttribute("src") ?? image?.getAttribute("data-src");
-          if (productId && imageUrl && !acc[productId]) {
-            acc[productId] = imageUrl;
+        const imageMap = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('a[href^="/product/"]')).reduce<Record<string, string>>((acc, link) => {
+            const href = link.getAttribute("href") ?? "";
+            const productId = href.match(/-(\d+)(?:$|[/?#])/i)?.[1];
+            const container = link.closest("section, article, li, div");
+            const image = container?.querySelector("img");
+            const imageUrl = image?.getAttribute("src") ?? image?.getAttribute("data-src");
+            if (productId && imageUrl && !acc[productId]) {
+              acc[productId] = imageUrl;
+            }
+            return acc;
+          }, {});
+        });
+
+        const apiResponse = await responsePromise;
+        const storeText = await page
+          .evaluate(() => {
+            const button = Array.from(document.querySelectorAll("button")).find((element) =>
+              /current store:/i.test(element.textContent ?? "")
+            );
+            return button?.textContent?.trim();
+          })
+          .catch(() => undefined);
+
+        if (apiResponse) {
+          const payload = parseAldiSearchPayload(await apiResponse.text());
+          const stateResults = extractAldiSearchResults(payload);
+          if (stateResults.length) {
+            return stateResults
+              .map((result) => mapAldiStateProduct(result, storeText, imageMap[result.sku ?? ""], options))
+              .filter((product): product is NormalizedProduct => Boolean(product))
+              .slice(0, options.maxResults ?? retailerConfig.maxResults);
           }
-          return acc;
-        }, {});
-      });
+        }
 
-      const apiResponse = await responsePromise;
-      const storeText = await page
-        .evaluate(() => {
-          const button = Array.from(document.querySelectorAll("button")).find((element) =>
-            /current store:/i.test(element.textContent ?? "")
-          );
-          return button?.textContent?.trim();
-        })
-        .catch(() => undefined);
+        const rawCards = await page.evaluate(() => {
+          const cards = Array.from(document.querySelectorAll('a[href^="/product/"]')).map<AldiDomCard | null>((link) => {
+            const href = link.getAttribute("href");
+            const container = link.closest("section, article, li, div");
+            const image = container?.querySelector("img");
+            const imageUrl = image?.getAttribute("src") ?? image?.getAttribute("data-src") ?? null;
+            const brand = container?.querySelector("p")?.textContent?.trim();
+            const paragraphs = Array.from(container?.querySelectorAll("p") ?? []);
+            const name = paragraphs[1]?.textContent?.trim() ?? link.textContent?.trim() ?? "";
+            const size = paragraphs.find((paragraph) => /\b(?:kg|g|l|ml|pack|each)\b/i.test(paragraph.textContent ?? ""))?.textContent?.trim();
+            const text = container?.textContent ?? "";
+            const priceText = text.match(/\$\d+(?:\.\d{1,2})?/)?.[0] ?? null;
+            const unitPriceText = text.match(/\(\$\d+(?:\.\d{1,2})?\s+per\s+\d+\s*(?:kg|g|l|ml|each)\)/i)?.[0] ?? null;
+            const promotionText = text.match(/On Sale [A-Za-z]{3} \d{1,2} [A-Za-z]{3}|While Stocks Last/i)?.[0] ?? null;
+            if (!href || !name) {
+              return null;
+            }
 
-      if (apiResponse) {
-        const payload = parseAldiSearchPayload(await apiResponse.text());
-        const stateResults = extractAldiSearchResults(payload);
-        if (stateResults.length) {
-          return stateResults
-            .map((result) => mapAldiStateProduct(result, storeText, imageMap[result.sku ?? ""], options))
-            .filter((product): product is NormalizedProduct => Boolean(product))
-            .slice(0, options.maxResults ?? retailerConfig.maxResults);
+            return { href, brand, name, imageUrl, size, unitPriceText, priceText, promotionText };
+          });
+
+          return cards.filter((card): card is AldiDomCard => Boolean(card));
+        });
+
+        const products = rawCards
+          .map((card) => mapAldiDomCard(card, storeText, options))
+          .filter((product): product is NormalizedProduct => Boolean(product))
+          .slice(0, options.maxResults ?? retailerConfig.maxResults);
+
+        if (products.length) {
+          return products;
         }
       }
 
-      const rawCards = await page.evaluate(() => {
-        const cards = Array.from(document.querySelectorAll('a[href^="/product/"]')).map<AldiDomCard | null>((link) => {
-          const href = link.getAttribute("href");
-          const container = link.closest("section, article, li, div");
-          const image = container?.querySelector("img");
-          const imageUrl = image?.getAttribute("src") ?? image?.getAttribute("data-src") ?? null;
-          const brand = container?.querySelector("p")?.textContent?.trim();
-          const paragraphs = Array.from(container?.querySelectorAll("p") ?? []);
-          const name = paragraphs[1]?.textContent?.trim() ?? link.textContent?.trim() ?? "";
-          const size = paragraphs.find((paragraph) => /\b(?:kg|g|l|ml|pack|each)\b/i.test(paragraph.textContent ?? ""))?.textContent?.trim();
-          const text = container?.textContent ?? "";
-          const priceText = text.match(/\$\d+(?:\.\d{1,2})?/)?.[0] ?? null;
-          const unitPriceText = text.match(/\(\$\d+(?:\.\d{1,2})?\s+per\s+\d+\s*(?:kg|g|l|ml|each)\)/i)?.[0] ?? null;
-          const promotionText = text.match(/On Sale [A-Za-z]{3} \d{1,2} [A-Za-z]{3}|While Stocks Last/i)?.[0] ?? null;
-          if (!href || !name) {
-            return null;
-          }
-
-          return { href, brand, name, imageUrl, size, unitPriceText, priceText, promotionText };
-        });
-
-        return cards.filter((card): card is AldiDomCard => Boolean(card));
-      });
-
-      return rawCards
-        .map((card) => mapAldiDomCard(card, storeText, options))
-        .filter((product): product is NormalizedProduct => Boolean(product))
-        .slice(0, options.maxResults ?? retailerConfig.maxResults);
+      return [];
     });
   }
+}
+
+export function buildAldiSearchQueries(intent: SearchIntent): string[] {
+  const semanticQuery = buildAldiSemanticQuery(intent);
+  return [...new Set([semanticQuery, intent.rawQuery].filter((value): value is string => Boolean(value)))];
 }
 
 export function extractAldiSearchResults(searchResults: unknown): AldiSearchProduct[] {
@@ -254,6 +269,34 @@ function buildAldiProductUrl(result: AldiSearchProduct): string {
   return `https://www.aldi.com.au/product/${slug}-${result.sku ?? ""}`;
 }
 
+function buildAldiSemanticQuery(intent: SearchIntent): string | undefined {
+  if (!intent.brandPreference || intent.coreType === intent.normalizedQuery) {
+    return undefined;
+  }
+
+  const parts = [intent.coreType, deriveAldiPackHint(intent)].filter((value): value is string => Boolean(value));
+  return parts.length ? parts.join(" ") : undefined;
+}
+
+function deriveAldiPackHint(intent: SearchIntent): string | undefined {
+  const desiredPackSize = intent.desiredPackSize;
+  if (!desiredPackSize || desiredPackSize.comparableUnitType !== "count") {
+    return undefined;
+  }
+
+  if (intent.normalizedQuery.includes("can")) {
+    return `${desiredPackSize.totalQuantity} cans`;
+  }
+  if (intent.normalizedQuery.includes("bottle")) {
+    return `${desiredPackSize.totalQuantity} bottles`;
+  }
+  if (desiredPackSize.totalQuantity > 1) {
+    return `${desiredPackSize.totalQuantity} pack`;
+  }
+
+  return undefined;
+}
+
 function normalizeAldiUnitPrice(value?: string | null): string | undefined {
   if (!value) {
     return undefined;
@@ -294,7 +337,7 @@ function appendSizeIfMissing(name: string, size?: string | null): string {
   return compact(name).includes(compact(size)) ? name : `${name} ${size}`.trim();
 }
 
-async function waitForAldiSearchPage(page: import("puppeteer").Page): Promise<boolean> {
+async function waitForAldiSearchPage(page: BrowserPage): Promise<boolean> {
   return page
     .waitForFunction(() => location.pathname === "/results", { timeout: 10_000 })
     .then(() => true)

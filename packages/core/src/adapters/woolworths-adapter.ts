@@ -2,6 +2,7 @@ import { BaseRetailerAdapter } from "./base.js";
 import { getRetailerConfig } from "../config/project-config.js";
 import { SearchIntent, SearchOptions, NormalizedProduct } from "../types/domain.js";
 import { clearAndType, humanDelay, navigateLikeUser, withBrowserPage } from "./shared/browser.js";
+import type { BrowserPage } from "./shared/browser.js";
 import { buildProductFromScrape } from "./shared/normalize.js";
 import { normalizeText } from "../parsing/query.js";
 
@@ -57,21 +58,35 @@ export class WoolworthsAdapter extends BaseRetailerAdapter {
     const retailerConfig = await getRetailerConfig(this.retailer);
 
     return withBrowserPage({ retailer: this.retailer, location: options.location }, async (page) => {
-      await navigateLikeUser(page, "https://www.woolworths.com.au/");
-      await clearAndType(page, "#wx-headerSearch", intent.rawQuery);
-      await humanDelay();
-      await page.click("#wx-button-header-search-find");
-      const reachedSearchPage = await waitForWoolworthsSearchPage(page);
-      if (!reachedSearchPage) {
-        await navigateLikeUser(page, searchUrl);
+      let ready = false;
+
+      await navigateLikeUser(page, searchUrl);
+      ready = await waitForWoolworthsResults(page, 15_000);
+
+      if (!ready) {
+        await navigateLikeUser(page, "https://www.woolworths.com.au/");
+        const searchInputReady = await page
+          .locator("#wx-headerSearch")
+          .waitFor({ timeout: 10_000 })
+          .then(() => true)
+          .catch(() => false);
+
+        if (searchInputReady) {
+          await clearAndType(page, "#wx-headerSearch", intent.rawQuery);
+          await humanDelay();
+          await page.click("#wx-button-header-search-find").catch(() => undefined);
+        }
+
+        const reachedSearchPage = await waitForWoolworthsSearchPage(page);
+        if (!reachedSearchPage) {
+          await navigateLikeUser(page, searchUrl);
+        }
+        ready = await waitForWoolworthsResults(page, 15_000);
       }
 
-      await page.waitForFunction(() => {
-        const data = (window as Window & { wowDataLayer?: { searchResults?: unknown } }).wowDataLayer?.searchResults;
-        return Boolean(data);
-      }, {
-        timeout: 30_000
-      });
+      if (!ready) {
+        throw new Error("Woolworths search state was not available in wowDataLayer.");
+      }
       await humanDelay();
 
       const imageMap = await page.evaluate(() => {
@@ -310,9 +325,32 @@ function slugify(value: string): string {
   return normalizeText(value).replace(/\s+/g, "-");
 }
 
-async function waitForWoolworthsSearchPage(page: import("puppeteer").Page): Promise<boolean> {
+async function waitForWoolworthsSearchPage(page: BrowserPage): Promise<boolean> {
   return page
     .waitForFunction(() => location.pathname.startsWith("/shop/search"), { timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function waitForWoolworthsResults(page: BrowserPage, timeout: number): Promise<boolean> {
+  return page
+    .waitForFunction(
+      () => {
+        const data = (window as Window & { wowDataLayer?: { searchResults?: unknown } }).wowDataLayer?.searchResults;
+        if (data) {
+          return true;
+        }
+
+        if (!location.pathname.startsWith("/shop/search")) {
+          return false;
+        }
+
+        const bodyText = document.body?.innerText ?? "";
+        return /showing results for/i.test(bodyText) || /product list/i.test(bodyText);
+      },
+      undefined,
+      { timeout }
+    )
     .then(() => true)
     .catch(() => false);
 }

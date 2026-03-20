@@ -5,6 +5,8 @@ import { AdapterHealth, AdapterSearchResult, NormalizedProduct, RetailerId, Sear
 import { getHistoricalFallbackProducts } from "./shared/historical-catalog.js";
 import { asScrapeFailure, runWithResilience } from "./shared/resilience.js";
 
+const ADAPTER_CACHE_VERSION = "playwright-v3";
+
 export interface RetailerAdapter {
   readonly retailer: RetailerId;
   search(intent: SearchIntent, options?: SearchOptions): Promise<AdapterSearchResult>;
@@ -27,7 +29,7 @@ export abstract class BaseRetailerAdapter implements RetailerAdapter {
   async search(intent: SearchIntent, options: SearchOptions = {}): Promise<AdapterSearchResult> {
     const projectConfig = await getProjectConfig();
     const retailerConfig = await getRetailerConfig(this.retailer);
-    const cacheKey = `${this.retailer}-${intent.normalizedQuery}-${options.location?.postcode ?? "default"}`;
+    const cacheKey = `${ADAPTER_CACHE_VERSION}:${this.retailer}-${intent.normalizedQuery}-${options.location?.postcode ?? "default"}`;
     const cached = await this.cache.get<AdapterSearchResult>(cacheKey);
     if (cached?.products.length) {
       return cached;
@@ -190,7 +192,7 @@ function shouldCacheResult(result: AdapterSearchResult): boolean {
     return false;
   }
 
-  return result.products.some((product) => product.sourceType !== "historical");
+  return result.health.status === "healthy" && result.health.browserMode !== "historical";
 }
 
 function hasRelevantResults(products: NormalizedProduct[], intent: SearchIntent): boolean {
@@ -217,8 +219,9 @@ function hasRelevantResults(products: NormalizedProduct[], intent: SearchIntent)
         .filter(Boolean)
         .join(" ")
     );
+    const brandMatch = intent.brandPreference ? haystack.includes(normalizeText(intent.brandPreference)) : false;
 
-    if (intent.requiredMatchTerms.length && !intent.requiredMatchTerms.some((term) => haystack.includes(term))) {
+    if (intent.requiredMatchTerms.length && !intent.requiredMatchTerms.some((term) => haystack.includes(term)) && !brandMatch) {
       return false;
     }
 
@@ -226,6 +229,6 @@ function hasRelevantResults(products: NormalizedProduct[], intent: SearchIntent)
       return false;
     }
 
-    return relevanceTerms.some((term) => haystack.includes(term));
+    return brandMatch || relevanceTerms.some((term) => haystack.includes(term));
   });
 }
