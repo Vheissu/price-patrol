@@ -1,0 +1,150 @@
+<div>
+  <div class="page-head">
+    <h1 class="page-head__title">Today</h1>
+    <p class="page-head__note">${dateLine}. What moved, what is on special, and which stores are answering.</p>
+  </div>
+
+  <div if.bind="error" class="error-note mb-5">${error}</div>
+
+  <div class="dash-grid">
+    <div class="space-y-6">
+      <section class="search-shell">
+        <form class="search-shell__row" submit.trigger:prevent="submitQuickCompare()">
+          <input value.bind="quickQuery" class="search-shell__input" placeholder="Price check anything, e.g. free range eggs 12" aria-label="Quick price check" />
+          <button class="search-shell__submit" type="submit">Check price</button>
+        </form>
+        <div if.bind="recentSearches.length" class="search-shell__options">
+          <span class="option-label">Recent</span>
+          <button repeat.for="query of recentSearches" type="button" class="chip" click.trigger="compareQuery(query)">${query}</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2 class="section-head__title">Watchlist</h2>
+          <a class="section-head__meta link-btn" load="lists">Manage</a>
+        </div>
+
+        <div if.bind="isLoading" class="space-y-2">
+          <div class="skeleton" style="height: 2.4rem;"></div>
+          <div class="skeleton" style="height: 2.4rem;"></div>
+        </div>
+
+        <div if.bind="!isLoading && !watchlist.length" class="empty-state">
+          Nothing on the watchlist. Add a target price from the compare screen and Price Patrol will flag it here when it lands.
+        </div>
+
+        <div if.bind="!isLoading && watchlist.length" class="panel" style="padding: 0.15rem 0.9rem;">
+          <div repeat.for="entry of orderedWatchlist" class="rowline">
+            <button type="button" class="deal-row" click.trigger="compareQuery(entry.query)">
+              <div class="min-w-0 flex-1">
+                <p class="deal-row__name">${entry.query}</p>
+                <p class="deal-row__meta">
+                  <span if.bind="entry.matchedProductName">${entry.matchedProductName}</span>
+                  <span if.bind="entry.retailer"> at ${entry.retailer === 'aldi' ? 'ALDI' : entry.retailer}</span>
+                  <span if.bind="entry.latestSeenAt">, seen ${agoOf(entry.latestSeenAt)}</span>
+                </p>
+              </div>
+              <div class="text-right shrink-0">
+                <p class="price price--md" class.price--good.bind="entry.triggerState === 'target-hit'">
+                  ${entry.latestSeenPrice != null ? moneyOf(entry.latestSeenPrice) : '--'}
+                </p>
+                <p if.bind="entry.targetPrice != null" class="price-unit">target ${moneyOf(entry.targetPrice)}</p>
+              </div>
+              <span class.bind="watchStateClass(entry)">${watchStateLabel(entry)}</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2 class="section-head__title">Specials radar</h2>
+          <span class="section-head__meta">last 3 weeks of sightings</span>
+        </div>
+
+        <div if.bind="isLoading" class="space-y-2">
+          <div class="skeleton" style="height: 3.2rem;"></div>
+          <div class="skeleton" style="height: 3.2rem;"></div>
+          <div class="skeleton" style="height: 3.2rem;"></div>
+        </div>
+
+        <div if.bind="!isLoading && !deals.length" class="empty-state">
+          No specials on file yet. The radar fills itself in as you run comparisons.
+        </div>
+
+        <div if.bind="deals.length" class="panel" style="padding: 0.15rem 0.9rem;">
+          <div repeat.for="deal of dealRows" class="rowline">
+            <button type="button" class="deal-row" click.trigger="compareQuery(dealQuery(deal))">
+              <div class="thumb thumb--sm">
+                <img if.bind="deal.imageUrl" src.bind="deal.imageUrl" alt="" loading="lazy" />
+                <img if.bind="!deal.imageUrl && deal.retailer !== 'unmatched'" class="thumb__logo" src="/retailers/${deal.retailer}.svg" alt="" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="deal-row__name">${deal.productName}</p>
+                <p class="deal-row__meta">
+                  ${deal.retailer === 'aldi' ? 'ALDI' : deal.retailer}<span if.bind="deal.packLabel">, ${deal.packLabel}</span><span if.bind="deal.observedAt">, ${agoOf(deal.observedAt)}</span>
+                </p>
+              </div>
+              <span if.bind="deal.isNewLow" class="tag tag--deal">New low</span>
+              <span if.bind="!deal.isNewLow && deal.promotionText" class="tag tag--outline-deal">${deal.promotionText}</span>
+              <span if.bind="!deal.isNewLow && !deal.promotionText && deal.dropVsMedianPct != null" class="tag tag--outline-deal">${Math.round(deal.dropVsMedianPct * 100)}% below median</span>
+              <div class="text-right shrink-0" style="min-width: 4.5rem;">
+                <p class="price price--md price--deal">${moneyOf(deal.effectivePrice)}</p>
+                <p if.bind="deal.promotionalPrice != null && deal.promotionalPrice < deal.shelfPrice" class="price-unit" style="text-decoration: line-through;">${moneyOf(deal.shelfPrice)}</p>
+              </div>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="space-y-6">
+      <section class="panel">
+        <div class="section-head">
+          <h2 class="section-head__title">Stores</h2>
+        </div>
+        <div if.bind="!adapters.length && !isLoading" class="empty-state">No adapter status yet.</div>
+        <div repeat.for="adapter of adapters" class="health-row">
+          <div class="flex items-center gap-2.5">
+            <span class="health-dot health-dot--${adapter.status}"></span>
+            <retailer-mark retailer.bind="adapter.retailer"></retailer-mark>
+          </div>
+          <div class="text-right">
+            <p class="text-xs ink-copy" style="font-weight: 650;">${adapterStatusLabel(adapter)}</p>
+            <p class="faint-copy" style="font-size: 0.7rem;">
+              ${adapterModeLabel(adapter)}<span if.bind="adapter.lastSuccessfulRetrieval">, last ok ${agoOf(adapter.lastSuccessfulRetrieval)}</span>
+            </p>
+          </div>
+        </div>
+        <p if.bind="adapters.length && !anyHealthy" class="notice notice--bad mt-2">
+          Every store is offline right now. Results will come from the saved price file until a store answers again.
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <h2 class="section-head__title">Favourites</h2>
+          <a class="section-head__meta link-btn" load="lists">All</a>
+        </div>
+        <div if.bind="!favorites.length && !isLoading" class="empty-state">
+          Nothing starred yet. Favourite a product from the compare screen and it lands here.
+        </div>
+        <div repeat.for="favorite of favoriteRows" class="health-row">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <retailer-mark retailer.bind="favorite.retailer"></retailer-mark>
+            <button type="button" class="link-btn" style="text-decoration: none; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" click.trigger="compareQuery(favorite.canonicalName)">
+              ${favorite.canonicalName}
+            </button>
+          </div>
+          <div class="text-right shrink-0">
+            <p class="price price--md" style="font-size: 1rem;">${moneyOf(favorite.lastPrice)}</p>
+            <p if.bind="trendFor(favorite.productId)" class="trend trend--${trendFor(favorite.productId).direction === 'flat' ? 'flat faint-copy' : trendFor(favorite.productId).direction}">
+              ${trendFor(favorite.productId).direction === 'down' ? '▼' : trendFor(favorite.productId).direction === 'up' ? '▲' : ''} ${trendFor(favorite.productId).deltaText}
+            </p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>

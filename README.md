@@ -15,6 +15,8 @@ This project is scraping-first and browser-led. Puppeteer is used to behave like
 
 - Single-item comparison across Coles, Woolworths, and ALDI
 - Basket comparison with split-basket and single-store totals
+- Specials and price-drop detection from recorded price observations (`GET /api/deals`)
+- Watchlist trigger states (watching, on special, target hit) and favourite price trends
 - Shared internal product model for scraping or future API-backed retailers
 - Root TOML configuration with an interactive terminal wizard
 - MCP server for assistant/tool use
@@ -137,6 +139,7 @@ Routes:
 - `GET /api/match-preferences`
 - `POST /api/match-preferences`
 - `GET /api/products/:productId/history`
+- `GET /api/deals` (recent promotions, price drops and new lows from recorded observations)
 
 ### Example: compare one item
 
@@ -177,9 +180,12 @@ By default it calls `http://127.0.0.1:8787/api`. Override that with `PRICE_PATRO
 
 The web app lives in [apps/web](/Users/dwayne/Code/price-patrol/apps/web) and currently includes:
 
-- compare page
-- basket page
-- saved lists page
+- today page (watchlist triggers, specials radar, favourites with price trends, adapter health, quick compare)
+- compare page (live versus saved-data toggle, retailer filters, sorting, price-history sparkline, match explanations)
+- basket page (per-store run sheet, single-store totals, retailer health)
+- lists page (saved lists, favourites, watchlist with trigger states)
+
+Both compare and basket requests accept `allowLiveScrape`; when disabled or when stores fail to answer, results come from recorded observations instead.
 
 It talks only to the internal API and does not scrape directly.
 

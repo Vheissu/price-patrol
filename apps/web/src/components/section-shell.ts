@@ -4,10 +4,10 @@ import template from "./section-shell.html?raw";
 @customElement({
   name: "section-shell",
   template,
-  bindables: ["heading", "subheading", "aside"]
+  bindables: ["heading", "note", "meta"]
 })
 export class SectionShell {
   heading = "";
-  subheading = "";
-  aside = "";
+  note = "";
+  meta = "";
 }

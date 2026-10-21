@@ -1,0 +1,10 @@
+<svg if.bind="hasChart" class="spark" viewBox="0 0 320 84" role="img" aria-label="Price history chart">
+  <path class="spark__area" d.bind="areaPath"></path>
+  <line class="spark__median" x1="6" x2="314" y1.bind="medianY" y2.bind="medianY"></line>
+  <path class="spark__line" d.bind="linePath"></path>
+  <circle repeat.for="point of chartPoints"
+    class.bind="point.promo ? 'spark__dot spark__dot--promo' : 'spark__dot'"
+    cx.bind="point.x" cy.bind="point.y" r.bind="point.last ? 3 : 2.2"></circle>
+  <text class="spark__label" x="6" y.bind="highLabelY" text-anchor="start">${highLabel}</text>
+  <text class="spark__label" x="314" y.bind="lowLabelY" text-anchor="end">${lowLabel}</text>
+</svg>

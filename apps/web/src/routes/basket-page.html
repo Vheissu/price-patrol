@@ -1,177 +1,210 @@
-<template>
-<div class="layout-basket grid gap-6">
-  <div class="space-y-6">
-    <section-shell
-      heading="Basket compare"
-      subheading="Weekly trolley"
-      aside="Build the whole basket, reorder it, then compare the cheapest single-store basket against the split-basket route."
-    >
-      <div class="basket-form-grid grid gap-4">
-        <label class="field-shell lg:col-span-2">
-          <span class="field-label">Add item</span>
-          <input value.bind="draftItem" class="field-input" placeholder="greek yoghurt" keydown.trigger="handleDraftKeydown($event)" />
-        </label>
-        <label class="field-shell">
-          <span class="field-label">Postcode</span>
-          <input value.bind="postcode" class="field-input" placeholder="4101" />
-        </label>
-        <label class="field-shell">
-          <span class="field-label">Suburb</span>
-          <input value.bind="suburb" class="field-input" placeholder="West End" />
-        </label>
-        <button class="action-button" click.trigger="addRow()">Add</button>
-      </div>
+<div>
+  <div class="page-head">
+    <h1 class="page-head__title">Basket</h1>
+    <p class="page-head__note">Price the whole trolley at once. One store for convenience, or a split run for the lowest total.</p>
+  </div>
 
-      <div class="basket-actions-grid mt-4 grid gap-3">
-        <label class="field-shell">
-          <span class="field-label">Comparison mode</span>
-          <select value.bind="mode" class="field-input">
-            <option repeat.for="modeOption of modeOptions" model.bind="modeOption.value">${modeOption.label}</option>
-          </select>
-        </label>
-        <button class="action-button action-button--secondary mt-auto" click.trigger="compareBasket()" disabled.bind="isSubmitting">
-          ${isSubmitting ? 'Pricing…' : 'Price basket'}
-        </button>
-      </div>
-      <p class="mt-3 text-sm muted-copy">${selectedModeDetail}</p>
+  <div class="layout-basket grid gap-6">
+    <div class="space-y-5">
+      <section class="panel">
+        <div class="section-head">
+          <h2 class="section-head__title">Items</h2>
+          <span class="section-head__meta">${rows.length} lines</span>
+        </div>
 
-      <div if.bind="error" class="mt-4 error-box">
-        ${error}
-      </div>
-    </section-shell>
+        <div class="flex gap-2">
+          <input value.bind="draftItem" class="input" placeholder="Add an item, e.g. greek yoghurt" keydown.trigger="handleDraftKeydown($event)" aria-label="Add basket item" />
+          <button class="btn btn--ghost" click.trigger="addRow()">Add</button>
+        </div>
 
-    <section-shell
-      heading="List tools"
-      subheading="Reusable shopping lists"
-      aside="Most households will keep one main shopping list, but the same flow supports multiple named lists when you need them."
-    >
-      <div class="grid gap-4 md:grid-cols-[1fr_auto]">
-        <label class="field-shell">
-          <span class="field-label">Saved list</span>
-          <select value.bind="selectedListId" change.trigger="handleSelectedListChange()" class="field-input">
+        <div class="mt-3 grid gap-1.5">
+          <div repeat.for="row of rows" class="alt-row" style="cursor: default;">
+            <div class="flex flex-col gap-0.5">
+              <button class="link-btn" style="font-size: 0.7rem; text-decoration: none;" click.trigger="moveRow($index, -1)" aria-label="Move up">&#8593;</button>
+              <button class="link-btn" style="font-size: 0.7rem; text-decoration: none;" click.trigger="moveRow($index, 1)" aria-label="Move down">&#8595;</button>
+            </div>
+            <input value.bind="row.query" class="input" style="padding: 0.4rem 0.6rem; font-size: 0.85rem;" aria-label="Item query" />
+            <input value.bind="row.quantity" type="number" min="1" class="input" style="width: 4rem; padding: 0.4rem 0.5rem; font-size: 0.85rem;" aria-label="Quantity" />
+            <button class="link-btn" style="white-space: nowrap;" click.trigger="removeRow(row.id)">Remove</button>
+          </div>
+          <div if.bind="!rows.length" class="empty-state">The trolley is empty. Add items above or load a saved list.</div>
+        </div>
+
+        <hr class="rule" />
+
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="option-group">
+            <span class="option-label">Postcode</span>
+            <input value.bind="postcode" class="option-input" style="width: 4.5rem;" placeholder="4101" />
+          </div>
+          <div class="option-group">
+            <span class="option-label">Suburb</span>
+            <input value.bind="suburb" class="option-input" style="width: 7.5rem;" placeholder="West End" />
+          </div>
+          <div class="option-group">
+            <span class="option-label">Mode</span>
+            <select value.bind="mode" class="option-input">
+              <option repeat.for="modeOption of modeOptions" model.bind="modeOption.value">${modeOption.label}</option>
+            </select>
+          </div>
+          <label class="switch">
+            <input type="checkbox" checked.bind="allowLiveScrape" />
+            <span class="switch__track" aria-hidden="true"></span>
+            <span class="switch__label">${allowLiveScrape ? 'Live check' : 'Saved prices'}</span>
+          </label>
+        </div>
+        <p class="notice mt-2">${selectedModeDetail}</p>
+
+        <div class="mt-4 flex items-center gap-3">
+          <button class="btn btn--primary" click.trigger="compareBasket()" disabled.bind="isSubmitting || !rows.length">
+            ${isSubmitting ? 'Pricing' : 'Price basket'}
+          </button>
+          <span if.bind="isSubmitting" class="notice">${elapsedSeconds}s, ${allowLiveScrape ? 'stores are answering' : 'reading the price file'}</span>
+        </div>
+
+        <div if.bind="error" class="error-note mt-4">${error}</div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <h2 class="section-head__title">Saved lists</h2>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <select value.bind="selectedListId" change.trigger="handleSelectedListChange()" class="select" style="flex: 1; min-width: 12rem;">
             <option value="">New shopping list</option>
             <option repeat.for="list of savedLists" model.bind="list.id">${list.name}</option>
           </select>
-        </label>
-        <button class="action-button action-button--secondary md:mt-auto" disabled.bind="!selectedListId" click.trigger="loadSelectedList()">
-          Load list
-        </button>
-      </div>
+          <button class="btn btn--ghost" disabled.bind="!selectedListId" click.trigger="loadSelectedList()">Load</button>
+        </div>
 
-      <div class="mt-4 grid gap-4 md:grid-cols-2">
-        <label class="field-shell">
-          <span class="field-label">List name</span>
-          <input value.bind="listName" class="field-input" placeholder="Shopping list" />
-        </label>
-        <label class="field-shell">
-          <span class="field-label">Description</span>
-          <input value.bind="listDescription" class="field-input" placeholder="Weekly staples" />
-        </label>
-      </div>
+        <div class="mt-3 grid gap-3 sm:grid-cols-2">
+          <label class="field">
+            <span class="field__label">List name</span>
+            <input value.bind="listName" class="input" placeholder="Shopping list" />
+          </label>
+          <label class="field">
+            <span class="field__label">Description</span>
+            <input value.bind="listDescription" class="input" placeholder="Weekly staples" />
+          </label>
+        </div>
 
-      <div class="mt-4 flex flex-wrap gap-3">
-        <button class="action-button" disabled.bind="isSavingList" click.trigger="saveCurrentList()">
-          ${isSavingList ? 'Saving...' : (selectedListId ? 'Update list' : 'Save as list')}
-        </button>
-      </div>
+        <div class="mt-3">
+          <button class="btn btn--ghost" disabled.bind="isSavingList" click.trigger="saveCurrentList()">
+            ${isSavingList ? 'Saving' : (selectedListId ? 'Update list' : 'Save current items')}
+          </button>
+        </div>
 
-      <p if.bind="listMessage" class="mt-3 text-sm muted-copy">${listMessage}</p>
-    </section-shell>
+        <p if.bind="listMessage" class="notice mt-2">${listMessage}</p>
+      </section>
+    </div>
 
-    <section-shell
-      heading="Basket editor"
-      subheading="Items in play"
-      aside="Reorder lines to mirror your real shopping flow. Quantity hints stay attached to each item."
-    >
-      <div class="space-y-3">
-        <div repeat.for="row of rows" class="soft-panel">
-          <div class="flex flex-col gap-3 md:flex-row md:items-center">
-            <div class="flex grow items-center gap-3">
-              <div class="flex flex-col gap-2">
-                <button class="icon-button" click.trigger="moveRow($index, -1)">↑</button>
-                <button class="icon-button" click.trigger="moveRow($index, 1)">↓</button>
-              </div>
-              <label class="field-shell grow">
-                <span class="field-label">Item</span>
-                <input value.bind="row.query" class="field-input" />
-              </label>
-            </div>
-            <label class="field-shell md:w-28">
-              <span class="field-label">Qty</span>
-              <input value.bind="row.quantity" type="number" min="1" class="field-input" />
-            </label>
-            <button class="icon-button icon-button--danger md:mt-6" click.trigger="removeRow(row.id)">Remove</button>
+    <div class="space-y-5">
+      <section if.bind="basket" class="panel animate-in">
+        <div class="section-head">
+          <h2 class="section-head__title">The verdict</h2>
+          <span class="section-head__meta" if.bind="basket.comparedAt">${comparedAtLabel}</span>
+        </div>
+
+        <div class="flex items-end justify-between gap-4">
+          <div>
+            <p class="micro-label">Cheapest way home</p>
+            <p class="price price--xl price--deal mt-1">$${splitPlan.total.toFixed(2)}</p>
+          </div>
+          <div class="text-right">
+            <p class="notice" if.bind="splitSavingsLabel">${splitSavingsLabel}</p>
+            <p class="faint-copy" style="font-size: 0.74rem;" if.bind="bestSingleStore">${bestSingleStore.name}: $${bestSingleStore.total.toFixed(2)}</p>
           </div>
         </div>
-      </div>
-    </section-shell>
-  </div>
+      </section>
 
-  <div class="space-y-6">
-    <section-shell
-      heading="Strategy totals"
-      subheading="Store plans"
-      aside="These summaries make the travel tradeoff explicit: split baskets can win on price, but they cost time."
-    >
-      <div if.bind="basket" class="grid gap-3">
-        <article repeat.for="strategy of basket.strategies" class="result-card">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <p class="eyebrow">Strategy</p>
-              <h3 class="mt-2 font-display text-2xl">${strategy.name}</h3>
-              <p class="mt-2 text-sm muted-copy">${strategy.itemCount} items priced</p>
+      <section if.bind="basket && storeRuns.length">
+        <div class="section-head">
+          <h2 class="section-head__title">The run sheet</h2>
+          <span class="section-head__meta">split basket</span>
+        </div>
+
+        <div class="grid gap-2.5">
+          <div repeat.for="run of storeRuns" class="run-card">
+            <div class="run-card__head">
+              <retailer-mark retailer.bind="run.retailer"></retailer-mark>
+              <span class="price price--md" style="font-size: 1.05rem;">$${run.subtotal.toFixed(2)}</span>
             </div>
-            <div class="text-right">
-              <p class="eyebrow">Total</p>
-              <p class="font-display text-4xl">$${strategy.total.toFixed(2)}</p>
-              <p if.bind="strategy.savingsVsSplit != null" class="mt-2 text-sm muted-copy">Gap to split: $${strategy.savingsVsSplit.toFixed(2)}</p>
-            </div>
-          </div>
-
-          <div if.bind="strategy.notes.length" class="mt-4 space-y-2">
-            <p repeat.for="note of strategy.notes" class="list-bullet">${note}</p>
-          </div>
-
-          <div if.bind="strategy.retailers?.length" class="mt-5 grid gap-2">
-            <div repeat.for="retailer of strategy.retailers" class="mini-stat">
-              <span class="mini-stat__label">${retailer.retailer}</span>
-              <span class="mini-stat__value">$${retailer.total.toFixed(2)} · ${retailer.missingItems} missing</span>
+            <div class="run-card__items">
+              <div repeat.for="item of run.items" class="run-card__item">
+                <span class="min-w-0">
+                  <span if.bind="item.quantity > 1" class="run-card__item-qty">${item.quantity}&times; </span>${item.item}
+                  <div if.bind="item.productName" class="faint-copy" style="font-size: 0.72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.productName}</div>
+                </span>
+                <span class="run-card__item-cost">$${(item.cost * item.quantity).toFixed(2)}</span>
+              </div>
             </div>
           </div>
-        </article>
-      </div>
+        </div>
 
-      <div if.bind="!basket" class="empty-state">
-        Price the basket to see single-store and split-basket strategies.
-      </div>
-    </section-shell>
+        <div if.bind="unmatchedLines.length" class="error-note mt-3">
+          No confident match for: ${unmatchedItemsLabel}.
+        </div>
+      </section>
 
-    <section-shell
-      heading="Line-by-line results"
-      subheading="Matched products"
-      aside="Each line shows its current recommendation and any warnings about substitutions or missing matches."
-    >
-      <div if.bind="basket" class="space-y-3">
-        <article repeat.for="line of basket.lines" class="soft-panel">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <p class="eyebrow">Basket line</p>
-              <h3 class="mt-2 font-display text-2xl">${line.query}</h3>
+      <section if.bind="basket">
+        <div class="section-head">
+          <h2 class="section-head__title">Every line</h2>
+        </div>
+
+        <div class="panel" style="padding: 0.15rem 0.9rem;">
+          <div repeat.for="line of basket.lines" class="rowline" style="padding: 0.6rem 0;">
+            <button type="button" class="w-full text-left" style="background: none; border: none; cursor: pointer; padding: 0;" click.trigger="toggleLine(line.id)">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="ink-copy" style="font-weight: 650; font-size: 0.9rem;">
+                    ${line.query}<span if.bind="line.quantity > 1" class="faint-copy"> &times;${line.quantity}</span>
+                  </p>
+                  <p if.bind="line.recommended" class="deal-row__meta" style="white-space: normal;">
+                    ${line.recommended.retailer === 'aldi' ? 'ALDI' : line.recommended.retailer}, ${line.recommended.productName}
+                  </p>
+                  <p if.bind="!line.recommended" class="danger-copy" style="font-size: 0.78rem;">No confident match.</p>
+                </div>
+                <div class="text-right shrink-0">
+                  <p if.bind="line.recommended" class="price price--md" style="font-size: 1.05rem;">${lineCost(line.recommended, line.quantity)}</p>
+                  <p class="faint-copy" style="font-size: 0.72rem;">${line.alternatives.length + (line.recommended ? 1 : 0)} option${line.alternatives.length + (line.recommended ? 1 : 0) === 1 ? '' : 's'} ${isLineExpanded(line.id) ? '&#9650;' : '&#9660;'}</p>
+                </div>
+              </div>
+            </button>
+
+            <div if.bind="isLineExpanded(line.id) && (line.recommended || line.alternatives.length)" class="mt-2 grid gap-1.5">
+              <div repeat.for="card of lineOptions(line)" class="alt-row" style="cursor: default;">
+                <div class="thumb thumb--sm">
+                  <img if.bind="card.imageUrl" src.bind="card.imageUrl" alt="" loading="lazy" />
+                  <img if.bind="!card.imageUrl" class="thumb__logo" src="/retailers/${card.retailer}.svg" alt="" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="alt-row__name">${card.productName}</p>
+                  <p class="alt-row__sub">${card.retailer === 'aldi' ? 'ALDI' : card.retailer}, ${card.confidenceLabel}</p>
+                </div>
+                <div class="text-right shrink-0">
+                  <p class="price price--md" style="font-size: 0.95rem;">${lineCost(card, line.quantity)}</p>
+                  <p if.bind="card.unitPrice" class="price-unit">${card.unitPrice}</p>
+                </div>
+              </div>
+              <p repeat.for="note of line.notes" class="notice">${note}</p>
             </div>
-            <span class="pill-tag">${line.quantity}×</span>
           </div>
+        </div>
+      </section>
 
-          <p if.bind="line.recommended" class="mt-3 text-sm muted-copy">
-            ${line.recommended.retailer} · ${line.recommended.productName} · $${line.recommended.shelfPrice.toFixed(2)}
-          </p>
-          <p if.bind="!line.recommended" class="mt-3 text-sm danger-copy">No confident match yet.</p>
-
-          <div if.bind="line.notes.length" class="mt-4 space-y-2">
-            <p repeat.for="note of line.notes" class="list-bullet">${note}</p>
-          </div>
-        </article>
+      <div if.bind="basket?.retailerHealth.length" class="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <status-strip
+          repeat.for="source of basket.retailerHealth"
+          title.bind="source.retailer"
+          state.bind="source.status"
+          detail.bind="source.detail || source.lastSuccessAt"
+        ></status-strip>
       </div>
-    </section-shell>
+
+      <div if.bind="!basket && !isSubmitting" class="empty-state">
+        Price the basket to see the split run and single-store totals.
+      </div>
+    </div>
   </div>
 </div>
-</template>

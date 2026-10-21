@@ -1,9 +1,8 @@
-<template>
-<section class="surface-panel px-5 py-5 sm:px-6">
-  <div if.bind="heading" class="mb-4">
-    <p if.bind="subheading" class="eyebrow">${subheading}</p>
-    <h2 class="mt-1 font-display text-2xl leading-tight">${heading}</h2>
+<section class="panel">
+  <div if.bind="heading" class="section-head">
+    <h2 class="section-head__title">${heading}</h2>
+    <span if.bind="meta" class="section-head__meta">${meta}</span>
   </div>
+  <p if.bind="note" class="notice" style="margin-top: -0.5rem; margin-bottom: 0.85rem;">${note}</p>
   <au-slot></au-slot>
 </section>
-</template>

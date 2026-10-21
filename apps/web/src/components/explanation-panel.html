@@ -1,35 +1,37 @@
-<template>
 <div>
-  <div if.bind="isLoading" class="text-sm muted-copy">Loading explanation...</div>
-  <div if.bind="error" class="error-box">${error}</div>
+  <div if.bind="isLoading" class="space-y-2">
+    <div class="skeleton" style="height: 0.8rem; width: 92%;"></div>
+    <div class="skeleton" style="height: 0.8rem; width: 78%;"></div>
+    <div class="skeleton" style="height: 0.8rem; width: 60%;"></div>
+  </div>
+  <div if.bind="error" class="error-note">${error}</div>
 
   <div if.bind="explanation" class="space-y-4">
-    <p class="text-sm leading-relaxed muted-copy">${explanation.summary}</p>
+    <p class="text-sm muted-copy" style="line-height: 1.55;">${explanation.summary}</p>
 
     <div if.bind="explanation.reasons.length">
-      <p class="eyebrow mb-2">Reasons</p>
-      <ul class="space-y-1.5">
-        <li repeat.for="reason of explanation.reasons" class="list-bullet">${reason}</li>
+      <p class="micro-label mb-1.5">Why it ranked here</p>
+      <ul class="list-disc space-y-1 pl-4">
+        <li repeat.for="reason of explanation.reasons" class="text-sm muted-copy">${reason}</li>
       </ul>
     </div>
 
     <div if.bind="explanation.rankingFactors.length">
-      <p class="eyebrow mb-2">Ranking factors</p>
-      <ul class="space-y-1.5">
-        <li repeat.for="factor of explanation.rankingFactors" class="list-bullet">${factor}</li>
+      <p class="micro-label mb-1.5">Factors</p>
+      <ul class="list-disc space-y-1 pl-4">
+        <li repeat.for="factor of explanation.rankingFactors" class="text-sm muted-copy">${factor}</li>
       </ul>
     </div>
 
     <div if.bind="explanation.exclusions.length">
-      <p class="eyebrow mb-2">Excluded</p>
-      <ul class="space-y-1.5">
-        <li repeat.for="reason of explanation.exclusions" class="list-bullet">${reason}</li>
+      <p class="micro-label mb-1.5">Excluded</p>
+      <ul class="list-disc space-y-1 pl-4">
+        <li repeat.for="reason of explanation.exclusions" class="text-sm muted-copy">${reason}</li>
       </ul>
     </div>
   </div>
 
-  <div if.bind="!isLoading && !error && !explanation" class="text-sm muted-copy">
-    Run a comparison to see the explanation.
+  <div if.bind="!isLoading && !error && !explanation" class="text-sm faint-copy">
+    Run a comparison to see the reasoning.
   </div>
 </div>
-</template>

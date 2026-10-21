@@ -1,14 +1,17 @@
-<template>
-<div class="min-h-screen" style="background: var(--bg); color: var(--ink);">
+<div class="min-h-screen" style="background: var(--paper); color: var(--ink);">
   <header class="top-bar">
     <div class="top-bar__inner">
-      <div class="top-bar__brand">
-        <h1 class="font-display text-xl font-bold tracking-tight" style="color: var(--primary)">Price Patrol</h1>
-        <span class="top-bar__tagline hidden sm:inline">Grocery price radar</span>
-      </div>
+      <a class="brand" load="today">
+        <span class="brand__mark" aria-hidden="true"></span>
+        Price Patrol
+        <span class="brand__tagline hidden md:inline">the specials page for your pantry</span>
+      </a>
       <nav class="top-bar__nav" aria-label="Primary">
-        <button repeat.for="item of navigation" type="button" class="top-bar__link" click.trigger="navigate(item.route)">
+        <a repeat.for="item of navigation" class="nav-link" load.bind="item.route">
           ${item.label}
+        </a>
+        <button type="button" class="theme-toggle" title.bind="themeLabel" aria-label.bind="themeLabel" click.trigger="toggleTheme()">
+          ${themeGlyph}
         </button>
       </nav>
     </div>
@@ -18,4 +21,3 @@
     <au-viewport></au-viewport>
   </main>
 </div>
-</template>

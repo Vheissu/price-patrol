@@ -19,6 +19,7 @@ import {
   enrichItemComparison,
   explainPriceIntelligence,
   getProductHistory,
+  getRecentSpecials,
   getWatchlistView,
   recordBasketComparison,
   recordItemComparison
@@ -150,6 +151,11 @@ const matchPreferenceSchema = z.object({
 
 const historyQuerySchema = z.object({
   days: z.coerce.number().int().positive().max(365).optional()
+});
+
+const dealsQuerySchema = z.object({
+  days: z.coerce.number().int().positive().max(90).optional(),
+  limit: z.coerce.number().int().positive().max(100).optional()
 });
 
 const app = Fastify({ logger: true });
@@ -355,6 +361,17 @@ app.get("/api/products/:productId/history", async (request, reply) => {
   return {
     productId: params.data.productId,
     history: await getProductHistory(params.data.productId, query.data.days ?? 60)
+  };
+});
+
+app.get("/api/deals", async (request, reply) => {
+  const query = dealsQuerySchema.safeParse(request.query);
+  if (!query.success) {
+    return reply.status(400).send({ message: "Invalid deals request." });
+  }
+
+  return {
+    deals: await getRecentSpecials(query.data.days ?? 21, query.data.limit ?? 40)
   };
 });
 

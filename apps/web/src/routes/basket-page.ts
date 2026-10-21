@@ -1,9 +1,26 @@
+import { IRouteViewModel, Params, RouteNode } from "@aurelia/router";
 import { customElement } from "aurelia";
 import template from "./basket-page.html?raw";
-import { apiClient, type BasketCompareResponse, type BasketLineInput, type CompareMode, type SavedListSummary } from "../services/api-client";
+import {
+  apiClient,
+  type BasketCompareResponse,
+  type BasketLineInput,
+  type BasketPlan,
+  type CompareMode,
+  type RecommendationCard,
+  type SavedListSummary
+} from "../services/api-client";
+import { retailerLabel } from "../format";
 
 interface BasketRow extends BasketLineInput {
   quantity: number;
+}
+
+interface StoreRun {
+  retailer: string;
+  label: string;
+  items: Array<{ item: string; quantity: number; cost: number; productName?: string }>;
+  subtotal: number;
 }
 
 type ModeOption = {
@@ -15,30 +32,32 @@ type ModeOption = {
 const DEFAULT_LIST_NAME = "Shopping list";
 
 @customElement({ name: "basket-page", template })
-export class BasketPage {
+export class BasketPage implements IRouteViewModel {
   readonly api = apiClient();
   readonly modeOptions: ModeOption[] = [
     {
       value: "equivalent",
       label: "Flexible match",
-      detail: "Allows close equivalents and substitutes inside the basket."
+      detail: "Close equivalents and substitutes can fill a line."
     },
     {
       value: "exact",
       label: "Exact brand + pack",
-      detail: "Keeps the basket closer to the exact products you wrote down."
+      detail: "Lines stay close to the exact products you wrote down."
     },
     {
       value: "best-value",
       label: "Best value",
-      detail: "Optimizes by normalized value, even when pack sizes differ."
+      detail: "Normalised value wins, even when pack sizes differ."
     }
   ];
 
   mode: CompareMode = "equivalent";
   postcode = "";
   suburb = "";
+  allowLiveScrape = true;
   isSubmitting = false;
+  elapsedSeconds = 0;
   isSavingList = false;
   error = "";
   listMessage = "";
@@ -48,18 +67,112 @@ export class BasketPage {
   listName = DEFAULT_LIST_NAME;
   listDescription = "";
   savedLists: SavedListSummary[] = [];
+  expandedLines = new Set<string>();
   rows: BasketRow[] = [
     { id: crypto.randomUUID(), query: "plain flour", quantity: 1 },
     { id: crypto.randomUUID(), query: "full cream milk 2L", quantity: 1 },
     { id: crypto.randomUUID(), query: "eggs", quantity: 1 }
   ];
+  private elapsedTimer: ReturnType<typeof window.setInterval> | undefined;
 
-  async attached(): Promise<void> {
+  async loading(_params: Params, next: RouteNode): Promise<void> {
     await Promise.all([this.loadDefaultLocation(), this.refreshSavedLists()]);
+    const listId = next.queryParams.get("list");
+    if (listId && this.savedLists.some((list) => list.id === listId)) {
+      this.selectedListId = listId;
+      this.loadSelectedList();
+    }
+  }
+
+  detached(): void {
+    this.stopElapsed();
+  }
+
+  get comparedAtLabel(): string {
+    if (!this.basket?.comparedAt) {
+      return "";
+    }
+    return new Date(this.basket.comparedAt).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
   }
 
   get selectedModeDetail(): string {
     return this.modeOptions.find((option) => option.value === this.mode)?.detail ?? "";
+  }
+
+  get strategies(): BasketPlan[] {
+    if (!this.basket) {
+      return [];
+    }
+    return [...this.basket.strategies].sort((left, right) => {
+      if (left.name === "Split basket") {
+        return -1;
+      }
+      if (right.name === "Split basket") {
+        return 1;
+      }
+      return left.total - right.total;
+    });
+  }
+
+  get splitPlan(): BasketPlan | undefined {
+    return this.basket?.strategies.find((strategy) => strategy.name === "Split basket");
+  }
+
+  get bestSingleStore(): BasketPlan | undefined {
+    return this.basket?.strategies
+      .filter((strategy) => strategy.name !== "Split basket" && !(strategy.missingItems?.length))
+      .sort((left, right) => left.total - right.total)[0];
+  }
+
+  get splitSavingsLabel(): string {
+    const split = this.splitPlan;
+    const single = this.bestSingleStore;
+    if (!split || !single) {
+      return "";
+    }
+    const delta = single.total - split.total;
+    if (delta <= 0.005) {
+      return "Splitting saves nothing, one store does it all.";
+    }
+    return `Splitting saves $${delta.toFixed(2)} versus ${single.name}.`;
+  }
+
+  get storeRuns(): StoreRun[] {
+    const split = this.splitPlan;
+    if (!split?.allocations?.length) {
+      return [];
+    }
+
+    const groups = new Map<string, StoreRun>();
+    for (const allocation of split.allocations) {
+      const retailer = allocation.retailer;
+      let group = groups.get(retailer);
+      if (!group) {
+        group = { retailer, label: retailerLabel(retailer), items: [], subtotal: 0 };
+        groups.set(retailer, group);
+      }
+      group.items.push({
+        item: allocation.item,
+        quantity: allocation.quantity,
+        cost: allocation.cost,
+        productName: allocation.productName
+      });
+      group.subtotal += allocation.cost * allocation.quantity;
+    }
+
+    return Array.from(groups.values())
+      .filter((group) => group.retailer !== "unmatched")
+      .sort((left, right) => right.subtotal - left.subtotal);
+  }
+
+  get unmatchedItemsLabel(): string {
+    return this.unmatchedLines.map((line) => line.item).join(", ");
+  }
+
+  get unmatchedLines(): Array<{ item: string; quantity: number }> {
+    return (this.splitPlan?.allocations ?? [])
+      .filter((allocation) => allocation.retailer === "unmatched")
+      .map((allocation) => ({ item: allocation.item, quantity: allocation.quantity }));
   }
 
   handleDraftKeydown(event: KeyboardEvent): void {
@@ -142,6 +255,31 @@ export class BasketPage {
     this.rows = clone;
   }
 
+  toggleLine(lineId: string): void {
+    const next = new Set(this.expandedLines);
+    if (next.has(lineId)) {
+      next.delete(lineId);
+    } else {
+      next.add(lineId);
+    }
+    this.expandedLines = next;
+  }
+
+  isLineExpanded(lineId: string): boolean {
+    return this.expandedLines.has(lineId);
+  }
+
+  lineOptions(line: BasketCompareResponse["lines"][number]): RecommendationCard[] {
+    return [line.recommended, ...line.alternatives].filter((card): card is RecommendationCard => Boolean(card));
+  }
+
+  lineCost(card: RecommendationCard, quantity: number): string {
+    const unit = card.promotionalPrice != null && card.promotionalPrice < card.shelfPrice
+      ? card.promotionalPrice
+      : card.shelfPrice;
+    return `$${(unit * quantity).toFixed(2)}`;
+  }
+
   loadSelectedList(): void {
     const list = this.savedLists.find((entry) => entry.id === this.selectedListId);
     if (!list) {
@@ -196,14 +334,21 @@ export class BasketPage {
   }
 
   async compareBasket(): Promise<void> {
+    if (this.isSubmitting || !this.rows.length) {
+      return;
+    }
+
     this.isSubmitting = true;
     this.error = "";
+    this.expandedLines = new Set();
+    this.startElapsed();
 
     try {
       this.basket = await this.api.compareBasket({
         mode: this.mode,
         postcode: this.postcode.trim() || undefined,
         suburb: this.suburb.trim() || undefined,
+        allowLiveScrape: this.allowLiveScrape,
         items: this.rows.map((row) => ({ id: row.id, query: row.query, quantity: row.quantity }))
       });
     } catch (error) {
@@ -211,6 +356,22 @@ export class BasketPage {
       this.basket = undefined;
     } finally {
       this.isSubmitting = false;
+      this.stopElapsed();
+    }
+  }
+
+  private startElapsed(): void {
+    this.stopElapsed();
+    this.elapsedSeconds = 0;
+    this.elapsedTimer = window.setInterval(() => {
+      this.elapsedSeconds += 1;
+    }, 1_000);
+  }
+
+  private stopElapsed(): void {
+    if (this.elapsedTimer != null) {
+      window.clearInterval(this.elapsedTimer);
+      this.elapsedTimer = undefined;
     }
   }
 

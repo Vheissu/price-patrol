@@ -11,17 +11,17 @@ export class StatusStrip {
   state: "healthy" | "degraded" | "offline" | "fresh" | "recent" | "aging" | "stale" = "healthy";
   detail = "";
 
-  get badgeClass(): string {
+  get dotClass(): string {
     switch (this.state) {
       case "healthy":
       case "fresh":
-        return "status-badge status-badge--good";
+        return "health-dot health-dot--healthy";
       case "degraded":
       case "recent":
       case "aging":
-        return "status-badge status-badge--warn";
+        return "health-dot health-dot--degraded";
       default:
-        return "status-badge status-badge--bad";
+        return "health-dot health-dot--offline";
     }
   }
 }

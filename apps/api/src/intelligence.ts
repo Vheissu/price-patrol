@@ -27,6 +27,29 @@ export interface WatchlistView extends WatchlistItem {
   triggerState: "watching" | "target-hit" | "special";
 }
 
+export interface DealSummary {
+  productId: string;
+  retailer: string;
+  productName: string;
+  brand?: string;
+  queryText?: string;
+  observedAt: string;
+  shelfPrice: number;
+  promotionalPrice?: number;
+  effectivePrice: number;
+  promotionText?: string;
+  packLabel?: string;
+  unitPriceLabel?: string;
+  availabilityState: string;
+  imageUrl?: string;
+  sourceUrl?: string;
+  seenCount: number;
+  medianSeenPrice?: number;
+  dropVsMedianPct?: number;
+  isNewLow: boolean;
+  reason: "promotion" | "new-low" | "price-drop";
+}
+
 export async function recordItemComparison(result: ItemComparisonResult): Promise<void> {
   const products = [result.recommended, ...result.alternatives].filter(Boolean) as RankedProduct[];
   recordRankedProducts(products, result.query, result.comparisonMode, result.location);
@@ -120,6 +143,104 @@ export async function getWatchlistView(): Promise<WatchlistView[]> {
       triggerState
     };
   });
+}
+
+export async function getRecentSpecials(days = 21, limit = 40): Promise<DealSummary[]> {
+  const db = getDatabase();
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const selectLatestPerProduct = (whereClause: string) => `
+    SELECT
+      po.product_id, po.retailer, po.canonical_name, po.brand, po.query_text,
+      po.shelf_price, po.promotional_price, po.effective_price, po.promotion_text,
+      po.pack_quantity, po.pack_unit, po.unit_price, po.unit_price_unit,
+      po.availability_state, po.observed_at, po.source_url,
+      ci.cache_key AS image_cache_key
+    FROM product_observations po
+    JOIN (
+      SELECT product_id, MAX(observed_at) AS latest_observed_at
+      FROM product_observations
+      ${whereClause}
+      GROUP BY product_id
+    ) latest
+      ON latest.product_id = po.product_id AND latest.latest_observed_at = po.observed_at
+    LEFT JOIN (
+      SELECT product_id, cache_key, MAX(updated_at)
+      FROM cached_product_images
+      WHERE product_id IS NOT NULL
+      GROUP BY product_id
+    ) ci ON ci.product_id = po.product_id
+    ORDER BY po.observed_at DESC
+    LIMIT 200
+  `;
+  const recentRows = db.prepare(selectLatestPerProduct("WHERE observed_at >= :cutoff")).all({ cutoff });
+  const rows = (recentRows.length ? recentRows : db.prepare(selectLatestPerProduct("")).all({})) as Array<{
+    product_id: string;
+    retailer: string;
+    canonical_name: string;
+    brand?: string | null;
+    query_text?: string | null;
+    shelf_price: number;
+    promotional_price?: number | null;
+    effective_price: number;
+    promotion_text?: string | null;
+    pack_quantity?: number | null;
+    pack_unit?: string | null;
+    unit_price?: number | null;
+    unit_price_unit?: string | null;
+    availability_state: string;
+    observed_at: string;
+    source_url?: string | null;
+    image_cache_key?: string | null;
+  }>;
+
+  const deals: DealSummary[] = [];
+  for (const row of rows) {
+    const insight = getPriceIntelligence(row.product_id);
+    const seenCount = insight?.seenCount ?? 0;
+    const promotionText = cleanPromotionText(row.promotion_text);
+    const promoted = Boolean(promotionText);
+    const newLow = Boolean(insight?.isNewLow) && seenCount >= 2;
+    const priceDrop = Boolean(insight?.isLikelyOnSpecial) && seenCount >= 2;
+    if (!promoted && !newLow && !priceDrop) {
+      continue;
+    }
+
+    deals.push({
+      productId: row.product_id,
+      retailer: row.retailer,
+      productName: row.canonical_name,
+      brand: row.brand ?? undefined,
+      queryText: row.query_text ?? undefined,
+      observedAt: row.observed_at,
+      shelfPrice: row.shelf_price,
+      promotionalPrice: row.promotional_price ?? undefined,
+      effectivePrice: row.effective_price,
+      promotionText,
+      packLabel: row.pack_quantity != null && row.pack_unit ? `${row.pack_quantity}${row.pack_unit}` : undefined,
+      unitPriceLabel:
+        row.unit_price != null && row.unit_price_unit
+          ? `$${row.unit_price.toFixed(2)} / ${row.unit_price_unit}`
+          : undefined,
+      availabilityState: row.availability_state,
+      imageUrl: row.image_cache_key ? `/api/assets/product-images/${row.image_cache_key}` : undefined,
+      sourceUrl: row.source_url ?? undefined,
+      seenCount,
+      medianSeenPrice: insight?.medianSeenPrice,
+      dropVsMedianPct: insight?.dropVsMedianPct,
+      isNewLow: newLow,
+      reason: promoted ? "promotion" : newLow ? "new-low" : "price-drop"
+    });
+  }
+
+  deals.sort((left, right) => {
+    const dropDelta = (right.dropVsMedianPct ?? 0) - (left.dropVsMedianPct ?? 0);
+    if (dropDelta !== 0) {
+      return dropDelta;
+    }
+    return right.observedAt.localeCompare(left.observedAt);
+  });
+
+  return deals.slice(0, limit);
 }
 
 function recordRankedProducts(
@@ -230,7 +351,7 @@ function getPriceIntelligence(productId: string): PriceIntelligence | undefined 
     previousSeenPrice,
     dropVsMedianPct: dropVsMedianPct != null ? Number(dropVsMedianPct.toFixed(4)) : undefined,
     dropVsPreviousPct: dropVsPreviousPct != null ? Number(dropVsPreviousPct.toFixed(4)) : undefined,
-    isNewLow: currentPrice <= lowestSeenPrice,
+    isNewLow: currentPrice <= lowestSeenPrice && previousSeenPrice != null && currentPrice < previousSeenPrice,
     isLikelyOnSpecial: Boolean((dropVsMedianPct ?? 0) >= 0.08 || (dropVsPreviousPct ?? 0) >= 0.08)
   };
 }
@@ -307,6 +428,37 @@ function deriveWatchlistTrigger(
     return "special";
   }
   return "watching";
+}
+
+function cleanPromotionText(raw: string | null | undefined): string | undefined {
+  if (!raw) {
+    return undefined;
+  }
+
+  const text = raw
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    return undefined;
+  }
+
+  const segments = text
+    .split(/(?<=\$\d[\d.]*)\s+|(?<=price)\s+|(?<=PRICE)\s+/i)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const deduped = segments.filter((segment) => {
+    const key = segment.toLowerCase();
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+
+  return deduped.join(" ").replace(/\b(\S+(?:\s+\S+){0,3})\s+\1\b/gi, "$1").trim() || text;
 }
 
 function median(sortedValues: number[]): number {

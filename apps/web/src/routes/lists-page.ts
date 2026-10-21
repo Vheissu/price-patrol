@@ -1,6 +1,15 @@
-import { customElement } from "aurelia";
+import { IRouter } from "@aurelia/router";
+import { customElement, resolve } from "aurelia";
 import template from "./lists-page.html?raw";
-import { apiClient, type BasketLineInput, type CompareMode, type FavoriteProductSummary, type SavedListSummary, type WatchlistSummary } from "../services/api-client";
+import {
+  apiClient,
+  type BasketLineInput,
+  type CompareMode,
+  type FavoriteProductSummary,
+  type SavedListSummary,
+  type WatchlistSummary
+} from "../services/api-client";
+import { money, timeAgo } from "../format";
 
 type ModeOption = {
   value: CompareMode;
@@ -16,6 +25,7 @@ const DEFAULT_LIST_NAME = "Shopping list";
 @customElement({ name: "lists-page", template })
 export class ListsPage {
   readonly api = apiClient();
+  private readonly router = resolve(IRouter);
   readonly modeOptions: ModeOption[] = [
     { value: "equivalent", label: "Flexible match" },
     { value: "exact", label: "Exact brand + pack" },
@@ -49,6 +59,16 @@ export class ListsPage {
     await this.refresh();
   }
 
+  get orderedWatchlist(): WatchlistSummary[] {
+    const rank = (entry: WatchlistSummary) =>
+      entry.triggerState === "target-hit" ? 0 : entry.triggerState === "special" ? 1 : 2;
+    return [...this.watchlist].sort((left, right) => rank(left) - rank(right));
+  }
+
+  get formHeading(): string {
+    return this.formId ? `Editing ${this.name || "list"}` : "New list";
+  }
+
   handleSaveSubmit(event: Event): void {
     event.preventDefault();
     void this.save();
@@ -79,6 +99,10 @@ export class ListsPage {
     }
   }
 
+  modeText(mode: CompareMode): string {
+    return this.modeOptions.find((option) => option.value === mode)?.label ?? mode;
+  }
+
   editList(list: SavedListSummary): void {
     this.formId = list.id;
     this.name = list.name;
@@ -90,6 +114,18 @@ export class ListsPage {
       quantity: item.quantity ?? 1
     }));
     this.statusMessage = `Editing ${list.name}.`;
+  }
+
+  priceList(list: SavedListSummary): void {
+    void this.router.load(`/basket?list=${encodeURIComponent(list.id)}`);
+  }
+
+  recheckFavorite(favorite: FavoriteProductSummary): void {
+    void this.router.load(`/compare?q=${encodeURIComponent(favorite.canonicalName)}`);
+  }
+
+  recheckWatch(entry: WatchlistSummary): void {
+    void this.router.load(`/compare?q=${encodeURIComponent(entry.query)}`);
   }
 
   resetForm(): void {
@@ -126,6 +162,14 @@ export class ListsPage {
 
     this.draftItemQuery = "";
     this.draftItemQuantity = 1;
+  }
+
+  handleDraftKeydown(event: KeyboardEvent): void {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    this.addEditorItem();
   }
 
   removeEditorItem(itemId: string): void {
@@ -189,6 +233,9 @@ export class ListsPage {
   }
 
   async saveWatchlist(): Promise<void> {
+    if (!this.watchQuery.trim()) {
+      return;
+    }
     try {
       const targetPrice = this.watchTargetPrice.trim() ? Number(this.watchTargetPrice.trim()) : undefined;
       await this.api.saveWatchlist({
@@ -219,8 +266,31 @@ export class ListsPage {
       await this.api.deleteFavorite(productId);
       await this.refresh();
     } catch (error) {
-      this.error = error instanceof Error ? error.message : "Unable to delete favorite product.";
+      this.error = error instanceof Error ? error.message : "Unable to delete favourite product.";
     }
+  }
+
+  watchStateLabel(entry: WatchlistSummary): string {
+    switch (entry.triggerState) {
+      case "target-hit":
+        return "Target hit";
+      case "special":
+        return "On special";
+      default:
+        return "Watching";
+    }
+  }
+
+  watchStateClass(entry: WatchlistSummary): string {
+    return `watch-state watch-state--${entry.triggerState}`;
+  }
+
+  moneyOf(value: number): string {
+    return money(value);
+  }
+
+  agoOf(value?: string): string {
+    return timeAgo(value);
   }
 }
 

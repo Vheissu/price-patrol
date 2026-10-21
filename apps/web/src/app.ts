@@ -1,11 +1,18 @@
-import { IRouter, route } from "@aurelia/router";
-import { customElement, resolve } from "aurelia";
+import { route } from "@aurelia/router";
+import { customElement } from "aurelia";
 import template from "./app.html?raw";
+
+type Theme = "light" | "dark";
 
 @route({
   routes: [
     {
-      path: ["", "compare"],
+      path: ["", "today"],
+      component: import("./routes/today-page"),
+      title: "Today"
+    },
+    {
+      path: "compare",
       component: import("./routes/compare-page"),
       title: "Compare"
     },
@@ -21,27 +28,36 @@ import template from "./app.html?raw";
     },
     {
       path: "*path",
-      redirectTo: "compare"
+      redirectTo: ""
     }
   ]
 })
 @customElement({ name: "price-patrol-app", template })
 export class PricePatrolApp {
-  private readonly router = resolve(IRouter);
-
   readonly navigation = [
-    { label: "Compare", route: "/compare", eyebrow: "Single item" },
-    { label: "Basket", route: "/basket", eyebrow: "Whole trolley" },
-    { label: "Lists", route: "/lists", eyebrow: "Saved plans" }
+    { label: "Today", route: "today" },
+    { label: "Compare", route: "compare" },
+    { label: "Basket", route: "basket" },
+    { label: "Lists", route: "lists" }
   ];
 
-  readonly statusPills = [
-    "Shelf price + unit price aware",
-    "Retailer confidence surfaced",
-    "Freshness and caveats always visible"
-  ];
+  theme: Theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 
-  navigate(route: string): void {
-    void this.router.load(route);
+  get themeGlyph(): string {
+    return this.theme === "dark" ? "☀" : "☾";
+  }
+
+  get themeLabel(): string {
+    return this.theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+  }
+
+  toggleTheme(): void {
+    this.theme = this.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = this.theme;
+    try {
+      localStorage.setItem("pp-theme", this.theme);
+    } catch {
+      // Storage unavailable, keep the in-memory theme.
+    }
   }
 }

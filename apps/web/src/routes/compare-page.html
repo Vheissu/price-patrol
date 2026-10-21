@@ -1,53 +1,61 @@
-<template>
-<div class="compare-layout">
-  <section>
-    <form class="flex flex-col gap-3" submit.trigger="handleSubmit($event)">
-      <div class="search-bar">
-        <input value.bind="query" class="search-input" placeholder="What are you looking for? e.g. full cream milk 2L" />
-        <button class="search-button" disabled.bind="isSubmitting">
-          ${isSubmitting ? 'Comparing...' : 'Compare'}
-        </button>
-      </div>
-      <div class="search-options">
-        <div class="option-group">
-          <span class="option-label">Location</span>
-          <input value.bind="postcode" class="option-input" placeholder="4101" />
-          <input value.bind="suburb" class="option-input" placeholder="West End" />
-        </div>
-        <div class="option-group">
-          <span class="option-label">Mode</span>
-          <select value.bind="mode" class="option-input">
-            <option repeat.for="modeOption of modeOptions" model.bind="modeOption.value">${modeOption.label}</option>
-          </select>
-        </div>
-      </div>
-      <div class="soft-panel">
-        <p class="eyebrow">Match mode</p>
-        <p class="mt-2 text-sm muted-copy">${selectedModeDetail}</p>
-      </div>
-    </form>
-    <div if.bind="error" class="error-box mt-3">${error}</div>
-  </section>
+<div style="max-width: 56rem;">
+  <div class="page-head">
+    <h1 class="page-head__title">Compare</h1>
+    <p class="page-head__note">One item across Woolworths, Coles and ALDI. Prices come from the live shelf when the stores cooperate, the saved price file when they do not.</p>
+  </div>
 
-  <section if.bind="isSubmitting" class="progress-panel animate-in">
-    <div class="progress-panel__header">
+  <form class="search-shell" submit.trigger:prevent="runComparison()">
+    <div class="search-shell__row">
+      <input value.bind="query" class="search-shell__input" placeholder="e.g. full cream milk 2L" aria-label="Item to compare" />
+      <button class="search-shell__submit" type="submit" disabled.bind="isSubmitting || !query.trim()">
+        ${isSubmitting ? 'Checking' : 'Compare'}
+      </button>
+    </div>
+    <div class="search-shell__options">
+      <div class="option-group">
+        <span class="option-label">Location</span>
+        <input value.bind="postcode" class="option-input" style="width: 4.5rem;" placeholder="4101" aria-label="Postcode" />
+        <input value.bind="suburb" class="option-input" style="width: 7.5rem;" placeholder="West End" aria-label="Suburb" />
+      </div>
+      <div class="option-group">
+        <span class="option-label">Mode</span>
+        <select value.bind="mode" class="option-input" aria-label="Match mode">
+          <option repeat.for="modeOption of modeOptions" model.bind="modeOption.value">${modeOption.label}</option>
+        </select>
+      </div>
+      <label class="switch" title="When off, results come only from the saved price file and answer instantly.">
+        <input type="checkbox" checked.bind="allowLiveScrape" />
+        <span class="switch__track" aria-hidden="true"></span>
+        <span class="switch__label">${allowLiveScrape ? 'Live check' : 'Saved prices only'}</span>
+      </label>
+      <span class="notice" style="margin-left: auto;">${selectedModeDetail}</span>
+    </div>
+  </form>
+
+  <div if.bind="!result && !isSubmitting && recentSearches.length" class="mt-3 flex flex-wrap items-center gap-1.5">
+    <span class="micro-label">Recent</span>
+    <button repeat.for="search of recentSearches" type="button" class="chip" click.trigger="applySearch(search)">${search}</button>
+  </div>
+
+  <div if.bind="error" class="error-note mt-4">${error}</div>
+
+  <section if.bind="isSubmitting" class="progress-panel animate-in mt-5">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div>
-        <p class="section-label">Live comparison</p>
-        <h2 class="progress-panel__title">Checking stores and ranking the best match</h2>
+        <p class="progress-panel__title">${allowLiveScrape ? 'Checking the shelves' : 'Reading the price file'}</p>
+        <p class="notice mt-1">${allowLiveScrape ? 'Live scraping takes a moment while the stores answer.' : 'Saved observations only, so this should be quick.'}</p>
       </div>
       <div class="progress-retailers">
-        <div repeat.for="retailer of retailerSequence" class="progress-retailer">
-          <img class="progress-retailer__logo" src.bind="retailer.logoUrl" alt.bind="retailer.label" />
-          <span>${retailer.label}</span>
-        </div>
+        <span repeat.for="retailer of retailerSequence" class="progress-retailer">
+          <img class="progress-retailer__logo" src.bind="retailer.logoUrl" alt="" />
+          ${retailer.label}
+        </span>
       </div>
     </div>
 
     <div class="progress-steps">
       <div repeat.for="item of progressItems" class.bind="progressItemClass(item)">
-        <div class="progress-step__marker" aria-label.bind="progressMarkerLabel(item)">
-          <span class="progress-step__marker-glyph">${progressMarkerSymbol(item)}</span>
-        </div>
+        <span class="progress-step__marker">${progressMarkerSymbol(item)}</span>
         <div>
           <p class="progress-step__title">${item.title}</p>
           <p class="progress-step__detail">${item.detail}</p>
@@ -56,104 +64,150 @@
     </div>
   </section>
 
-  <div if.bind="result" class="flex flex-col gap-6 animate-in">
-    <section if.bind="result.recommended" class="flex flex-col gap-3">
-      <p class="section-label">Best price found</p>
-      <recommendation-card card.bind="result.recommended" highlight.bind="true" heading="Recommended"></recommendation-card>
+  <div if.bind="result" class="flex flex-col gap-5 mt-5 animate-in">
+    <section if.bind="selectedCard">
+      <recommendation-card card.bind="selectedCard" flag.bind="heroFlag"></recommendation-card>
 
-      <div class="hero-actions">
-        <button class="compact-btn" disabled.bind="isSavingFavorite" click.trigger="saveFavorite()">
-          ${isSavingFavorite ? 'Saving...' : 'Favorite'}
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <button class="btn btn--ghost btn--sm" disabled.bind="isSavingFavorite" click.trigger="saveFavorite()">
+          ${isSavingFavorite ? 'Saving' : 'Favourite'}
         </button>
-        <button class="compact-btn" disabled.bind="isSavingCorrection" click.trigger="saveMatchPreference()">
-          ${isSavingCorrection ? 'Saving...' : 'Prefer this'}
+        <button if.bind="!selectedIsRecommended" class="btn btn--ghost btn--sm" disabled.bind="isSavingCorrection" click.trigger="saveMatchPreference()">
+          ${isSavingCorrection ? 'Saving' : 'Always prefer this'}
         </button>
-        <div class="watch-group">
-          <input value.bind="targetPriceText" class="watch-input" placeholder="Target $" />
-          <button class="compact-btn" disabled.bind="isSavingWatchlist" click.trigger="saveWatchlist()">
-            ${isSavingWatchlist ? 'Saving...' : 'Watch'}
+        <div class="option-group">
+          <input value.bind="targetPriceText" class="option-input" style="width: 4.5rem;" placeholder="Target $" aria-label="Target price" />
+          <button class="btn btn--ghost btn--sm" disabled.bind="isSavingWatchlist" click.trigger="saveWatchlist()">
+            ${isSavingWatchlist ? 'Saving' : 'Watch'}
           </button>
         </div>
-        <div class="watch-group">
-          <select value.bind="selectedListId" class="watch-input min-w-40">
+        <div class="option-group">
+          <select value.bind="selectedListId" class="option-input" aria-label="Shopping list">
             <option value="">Shopping list</option>
             <option repeat.for="list of savedLists" model.bind="list.id">${list.name}</option>
           </select>
-          <button class="compact-btn" disabled.bind="isSavingList" click.trigger="addToList()">
-            ${isSavingList ? 'Saving...' : 'Add to list'}
+          <button class="btn btn--ghost btn--sm" disabled.bind="isSavingList" click.trigger="addToList()">
+            ${isSavingList ? 'Saving' : 'Add to list'}
           </button>
         </div>
       </div>
-      <p if.bind="mode !== 'exact'" class="feedback-msg">Flexible and Best value modes can surface substitutes. Use Exact brand + pack when you only want the named product.</p>
-      <p if.bind="favoriteMessage" class="feedback-msg">${favoriteMessage}</p>
-      <p if.bind="correctionMessage" class="feedback-msg">${correctionMessage}</p>
-      <p if.bind="watchlistMessage" class="feedback-msg">${watchlistMessage}</p>
-      <p if.bind="listMessage" class="feedback-msg">${listMessage}</p>
+
+      <p if.bind="mode !== 'exact'" class="notice mt-2">Flexible and Best value modes can surface substitutes. Exact brand + pack keeps the named product.</p>
+      <p if.bind="favoriteMessage" class="notice mt-1">${favoriteMessage}</p>
+      <p if.bind="correctionMessage" class="notice mt-1">${correctionMessage}</p>
+      <p if.bind="watchlistMessage" class="notice mt-1">${watchlistMessage}</p>
+      <p if.bind="listMessage" class="notice mt-1">${listMessage}</p>
     </section>
 
-    <section if.bind="result.alternatives.length">
-      <p class="section-label">Also available &middot; ${result.alternatives.length} options</p>
-      <div class="alternatives-grid">
-        <button repeat.for="card of result.alternatives" class="text-left" click.trigger="selectCard(card)">
-          <recommendation-card card.bind="card" highlight.bind="selectedCard === card"></recommendation-card>
+    <section if.bind="allCandidates.length > 1">
+      <div class="section-head">
+        <h2 class="section-head__title">All candidates</h2>
+        <span class="section-head__meta">${visibleAlternatives.length} of ${allCandidates.length}</span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-1.5 mb-2">
+        <button repeat.for="filter of retailerFilters" type="button"
+          class="chip" class.chip--active.bind="retailerFilter === filter.id"
+          click.trigger="setRetailerFilter(filter.id)">
+          <img if.bind="filter.logoUrl" class="chip__logo" src.bind="filter.logoUrl" alt="" />
+          ${filter.label}
+        </button>
+        <select value.bind="sortMode" class="option-input ml-auto" aria-label="Sort candidates">
+          <option model.bind="'ranked'">Ranked</option>
+          <option model.bind="'price'">Price: low to high</option>
+        </select>
+      </div>
+
+      <div class="grid gap-1.5">
+        <button repeat.for="card of visibleAlternatives" type="button"
+          class="alt-row" class.alt-row--selected.bind="selectedCard === card"
+          click.trigger="selectCard(card)">
+          <div class="thumb thumb--sm">
+            <img if.bind="card.imageUrl" src.bind="card.imageUrl" alt="" loading="lazy" />
+            <img if.bind="!card.imageUrl" class="thumb__logo" src.bind="retailerLogo(card)" alt="" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="alt-row__name">${card.productName}</p>
+            <p class="alt-row__sub">
+              <span if.bind="card.brand">${card.brand}</span><span if.bind="card.brand && card.packSize">, </span><span if.bind="card.packSize">${card.packSize}</span>
+            </p>
+          </div>
+          <span if.bind="card.priceIntelligence?.isNewLow" class="tag tag--deal">New low</span>
+          <span if.bind="card.promotionText" class="tag tag--outline-deal">${card.promotionText}</span>
+          <retailer-mark retailer.bind="card.retailer"></retailer-mark>
+          <div class="text-right shrink-0" style="min-width: 4.25rem;">
+            <p class="price price--md" class.price--deal.bind="cardHasPromo(card)">${cardPrice(card)}</p>
+            <p if.bind="card.unitPrice" class="price-unit">${card.unitPrice}</p>
+          </div>
+          <span class="tag tag--muted">${card.confidenceLabel}</span>
         </button>
       </div>
     </section>
 
-    <div if.bind="selectedCard?.priceIntelligence" class="flex flex-col">
-      <button class="collapsible-trigger" click.trigger="showPriceIntel = !showPriceIntel">
-        Price intelligence
-        <span class="collapsible-chevron" class.open.bind="showPriceIntel">&gt;</span>
-      </button>
-      <div if.bind="showPriceIntel" class="collapsible-content">
-        <div class="intel-grid">
-          <p class="intel-stat"><strong>${selectedCard.priceIntelligence.seenCount}</strong> times seen</p>
-          <p class="intel-stat">Median <strong>$${selectedCard.priceIntelligence.medianSeenPrice.toFixed(2)}</strong></p>
-          <p class="intel-stat">Low <strong>$${selectedCard.priceIntelligence.lowestSeenPrice.toFixed(2)}</strong></p>
-          <p if.bind="selectedCard.priceIntelligence.dropVsMedianPct != null" class="intel-stat">
-            <strong>${Math.round(selectedCard.priceIntelligence.dropVsMedianPct * 100)}%</strong> below median
-          </p>
-        </div>
-        <div if.bind="history.length" class="mt-4">
-          <p class="eyebrow mb-2">Recent price history</p>
-          <div repeat.for="point of recentHistory" class="history-row">
-            <span>${new Date(point.observedAt).toLocaleString()}</span>
-            <span>${point.retailer} &middot; $${point.effectivePrice.toFixed(2)}</span>
+    <section if.bind="selectedCard">
+      <div class="disclosure">
+        <button class="disclosure__trigger" click.trigger="showPriceIntel = !showPriceIntel">
+          Price file<span if.bind="selectedCard.priceIntelligence" class="faint-copy" style="font-weight: 400;">, ${selectedCard.priceIntelligence.seenCount} sightings</span>
+          <span class="disclosure__chevron" class.disclosure__chevron--open.bind="showPriceIntel">&rsaquo;</span>
+        </button>
+        <div if.bind="showPriceIntel" class="disclosure__body">
+          <div if.bind="selectedCard.priceIntelligence" class="stat-grid mb-4">
+            <div class="stat">
+              <span class="stat__label">Median</span>
+              <span class="stat__value">$${selectedCard.priceIntelligence.medianSeenPrice.toFixed(2)}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__label">Lowest seen</span>
+              <span class="stat__value">$${selectedCard.priceIntelligence.lowestSeenPrice.toFixed(2)}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__label">Highest seen</span>
+              <span class="stat__value">$${selectedCard.priceIntelligence.highestSeenPrice.toFixed(2)}</span>
+            </div>
+            <div class="stat" if.bind="selectedCard.priceIntelligence.dropVsMedianPct != null">
+              <span class="stat__label">Vs median</span>
+              <span class="stat__value" class.price--good.bind="selectedCard.priceIntelligence.dropVsMedianPct > 0">
+                ${selectedCard.priceIntelligence.dropVsMedianPct > 0 ? '-' : '+'}${Math.abs(Math.round(selectedCard.priceIntelligence.dropVsMedianPct * 100))}%
+              </span>
+            </div>
           </div>
+
+          <div if.bind="history.length > 1" class="panel panel--tinted" style="padding: 0.75rem 0.9rem;">
+            <price-chart points.bind="history"></price-chart>
+            <p class="price-unit mt-1">${history.length} observations, ${historyWindow}</p>
+          </div>
+          <p if.bind="history.length <= 1" class="notice">Not enough sightings to chart yet. Each comparison adds to the file.</p>
         </div>
       </div>
-    </div>
 
-    <div class="flex flex-col">
-      <button class="collapsible-trigger" click.trigger="showExplanation = !showExplanation">
-        Why this was recommended
-        <span class="collapsible-chevron" class.open.bind="showExplanation">&gt;</span>
-      </button>
-      <div if.bind="showExplanation" class="collapsible-content">
-        <explanation-panel
-          explanation.bind="explanation"
-          is-loading.bind="isExplanationLoading"
-          error.bind="explanationError"
-        ></explanation-panel>
-      </div>
-    </div>
-
-    <div if.bind="result.notes.length" class="flex flex-col">
-      <button class="collapsible-trigger" click.trigger="showNotes = !showNotes">
-        Notes &amp; warnings &middot; ${result.notes.length}
-        <span class="collapsible-chevron" class.open.bind="showNotes">&gt;</span>
-      </button>
-      <div if.bind="showNotes" class="collapsible-content space-y-3">
-        <div repeat.for="note of result.notes" class="soft-panel">
-          <p class="eyebrow">${note.kind}</p>
-          <p class="mt-1 text-sm muted-copy">${note.message}</p>
+      <div class="disclosure">
+        <button class="disclosure__trigger" click.trigger="showExplanation = !showExplanation">
+          Why this was recommended
+          <span class="disclosure__chevron" class.disclosure__chevron--open.bind="showExplanation">&rsaquo;</span>
+        </button>
+        <div if.bind="showExplanation" class="disclosure__body">
+          <explanation-panel
+            explanation.bind="explanation"
+            is-loading.bind="isExplanationLoading"
+            error.bind="explanationError"
+          ></explanation-panel>
         </div>
       </div>
-    </div>
 
-    <div class="status-row">
+      <div if.bind="result.notes.length" class="disclosure">
+        <button class="disclosure__trigger" click.trigger="showNotes = !showNotes">
+          Notes and warnings<span class="faint-copy" style="font-weight: 400;">, ${result.notes.length}</span>
+          <span class="disclosure__chevron" class.disclosure__chevron--open.bind="showNotes">&rsaquo;</span>
+        </button>
+        <div if.bind="showNotes" class="disclosure__body space-y-2">
+          <p repeat.for="note of result.notes" class="notice">${note.kind}: ${note.message}</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
       <status-strip
-        title="Last refreshed"
+        title="Checked"
         state.bind="recommendedFreshnessState"
         detail.bind="comparedAtLabel"
       ></status-strip>
@@ -166,4 +220,3 @@
     </div>
   </div>
 </div>
-</template>
