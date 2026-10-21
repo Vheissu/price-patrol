@@ -47,6 +47,10 @@ export interface AdapterHealthSummary {
   extractionConfidence: number;
   browserMode: "live" | "historical" | "hybrid";
   recentFailure?: string;
+  consecutiveFailures?: number;
+  circuitState?: "closed" | "open" | "half-open";
+  circuitOpenUntil?: string;
+  cooldownUntil?: string;
 }
 
 export interface ComparisonNote {

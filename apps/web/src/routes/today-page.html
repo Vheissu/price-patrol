@@ -115,6 +115,7 @@
             <p class="faint-copy" style="font-size: 0.7rem;">
               ${adapterModeLabel(adapter)}<span if.bind="adapter.lastSuccessfulRetrieval">, last ok ${agoOf(adapter.lastSuccessfulRetrieval)}</span>
             </p>
+            <p if.bind="adapterPauseLabel(adapter)" class="faint-copy" style="font-size: 0.7rem;">${adapterPauseLabel(adapter)}</p>
           </div>
         </div>
         <p if.bind="adapters.length && !anyHealthy" class="notice notice--bad mt-2">

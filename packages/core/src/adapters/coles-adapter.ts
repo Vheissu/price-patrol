@@ -82,7 +82,7 @@ export class ColesAdapter extends BaseRetailerAdapter {
       let ready = false;
 
       try {
-        if (!primedSessions.has(sessionKey)) {
+        if (!(await isColesSessionPrimed(page, sessionKey))) {
           lastStep = "homepage warm-up";
           await navigateLikeUser(page, "https://www.coles.com.au/");
           await waitForColesHomepageSearchInput(page, 10_000);
@@ -96,8 +96,10 @@ export class ColesAdapter extends BaseRetailerAdapter {
 
         if (!ready) {
           lastStep = "re-prime location";
+          primedSessions.delete(sessionKey);
           await navigateLikeUser(page, "https://www.coles.com.au/");
           await primeColesSession(page, options.location);
+          primedSessions.add(sessionKey);
           await navigateLikeUser(page, searchUrl);
           ready = await waitForColesSearchResults(page, 10_000);
         }
@@ -296,6 +298,20 @@ function normalizeColesUnitPrice(value?: string): string | undefined {
   }
 
   return value.replace(/\s+/g, " ").replace("/ ", "/ ").trim();
+}
+
+async function isColesSessionPrimed(page: BrowserPage, sessionKey: string): Promise<boolean> {
+  if (primedSessions.has(sessionKey)) {
+    return true;
+  }
+
+  // A restored storage state (or a long-lived context) may already carry the fulfilment cookie.
+  const cookies = await page.context().cookies("https://www.coles.com.au").catch(() => []);
+  const primed = cookies.some((cookie) => cookie.name === "fulfillmentStoreId" && Boolean(cookie.value));
+  if (primed) {
+    primedSessions.add(sessionKey);
+  }
+  return primed;
 }
 
 function getColesSessionKey(options: SearchOptions): string {

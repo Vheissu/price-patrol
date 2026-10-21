@@ -110,6 +110,8 @@ export interface SearchOptions {
   preferredProductIds?: string[];
 }
 
+export type CircuitState = "closed" | "open" | "half-open";
+
 export interface AdapterHealth {
   retailer: RetailerId;
   status: "healthy" | "degraded" | "offline";
@@ -117,6 +119,10 @@ export interface AdapterHealth {
   extractionConfidence: number;
   browserMode: "live" | "historical" | "hybrid";
   recentFailure?: string;
+  consecutiveFailures?: number;
+  circuitState?: CircuitState;
+  circuitOpenUntil?: string;
+  cooldownUntil?: string;
 }
 
 export interface AdapterSearchResult {

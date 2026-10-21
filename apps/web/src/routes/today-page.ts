@@ -125,6 +125,22 @@ export class TodayPage implements IRouteViewModel {
     return adapter.status.charAt(0).toUpperCase() + adapter.status.slice(1);
   }
 
+  adapterPauseLabel(adapter: AdapterHealthSummary): string | undefined {
+    const pausedUntil = adapter.circuitOpenUntil ?? adapter.cooldownUntil;
+    if (!pausedUntil) {
+      return undefined;
+    }
+
+    const remainingMs = new Date(pausedUntil).getTime() - Date.now();
+    if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+      return undefined;
+    }
+
+    const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+    const reason = adapter.circuitOpenUntil ? "paused after repeated failures" : "cooling down";
+    return `${reason}, live checks resume in ${minutes} min`;
+  }
+
   adapterModeLabel(adapter: AdapterHealthSummary): string {
     switch (adapter.browserMode) {
       case "live":

@@ -70,7 +70,16 @@ function getDatabase(): DatabaseSync {
       CREATE INDEX IF NOT EXISTS idx_adapter_cache_entries_expires_at
         ON adapter_cache_entries(expires_at);
     `);
+    sweepExpiredEntries(database);
   }
 
   return database;
+}
+
+function sweepExpiredEntries(db: DatabaseSync): void {
+  try {
+    db.prepare("DELETE FROM adapter_cache_entries WHERE expires_at < :now").run({ now: Date.now() });
+  } catch {
+    // A locked database at startup is not fatal; expired rows are also dropped lazily on read.
+  }
 }

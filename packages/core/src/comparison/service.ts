@@ -13,6 +13,7 @@ import { getProjectConfig } from "../config/project-config.js";
 import { parseSearchIntent } from "../parsing/query.js";
 import { rankProducts } from "./matching.js";
 import { RetailerAdapter } from "../adapters/base.js";
+import { AdapterSearchResult } from "../types/domain.js";
 
 export class PricePatrolService {
   constructor(private readonly adapters: RetailerAdapter[]) {}
@@ -102,10 +103,12 @@ export class PricePatrolService {
     const singleRetailerTotals = retailerIds.map((retailer) => {
       const matchedItems: RankedProduct[] = [];
       const missingItems: string[] = [];
+      const lineCandidates: Array<RankedProduct | undefined> = [];
       for (const line of lines) {
         const candidate = [line.comparison.recommended, ...line.comparison.alternatives]
           .filter(Boolean)
           .find((ranked) => ranked?.product.retailer === retailer) as RankedProduct | undefined;
+        lineCandidates.push(candidate);
         if (!candidate) {
           missingItems.push(line.requestedItem.name);
           continue;
@@ -114,7 +117,12 @@ export class PricePatrolService {
       }
       return {
         retailer,
-        total: matchedItems.reduce((sum, item) => sum + item.product.effectiveComparisonPrice * (item.product.packSize?.multipackQuantity ? 1 : 1), 0),
+        total: roundMoney(
+          lines.reduce((sum, line, index) => {
+            const candidate = lineCandidates[index];
+            return candidate ? sum + candidate.product.effectiveComparisonPrice * requestedQuantity(line.requestedItem) : sum;
+          }, 0)
+        ),
         matchedItems,
         missingItems
       };
@@ -124,7 +132,12 @@ export class PricePatrolService {
       requestedItem: line.requestedItem,
       chosen: line.comparison.recommended ?? null
     }));
-    const splitTotal = splitAllocations.reduce((sum, line) => sum + (line.chosen?.product.effectiveComparisonPrice ?? 0), 0);
+    const splitTotal = roundMoney(
+      splitAllocations.reduce(
+        (sum, line) => sum + (line.chosen?.product.effectiveComparisonPrice ?? 0) * requestedQuantity(line.requestedItem),
+        0
+      )
+    );
     const bestSingleRetailer = singleRetailerTotals
       .filter((summary) => summary.missingItems.length === 0)
       .sort((left, right) => left.total - right.total)[0];
@@ -138,27 +151,43 @@ export class PricePatrolService {
       splitBasket: {
         total: splitTotal,
         allocations: splitAllocations,
-        savingsVsBestSingleRetailer: bestSingleRetailer ? bestSingleRetailer.total - splitTotal : 0
+        savingsVsBestSingleRetailer: bestSingleRetailer ? roundMoney(bestSingleRetailer.total - splitTotal) : 0
       },
       warnings: lines.flatMap((line) => line.comparison.warnings)
     };
   }
 }
 
-function applySavings(ranked: RankedProduct[], mode: ComparisonMode): void {
+export function applySavings(ranked: RankedProduct[], mode: ComparisonMode): void {
+  if (ranked.length < 2) {
+    return;
+  }
+
   const priceOf = (candidate: RankedProduct) =>
     mode === "best-value" ? candidate.product.unitPrice?.value ?? candidate.product.effectiveComparisonPrice : candidate.product.effectiveComparisonPrice;
+  const prices = ranked.map(priceOf);
+  const mostExpensive = Math.max(...prices);
 
   ranked.forEach((candidate, index) => {
-    const next = ranked[index + 1];
-    const last = ranked[ranked.length - 1];
-    if (next) {
-      candidate.savingsVsNextCheapest = Number(Math.max(0, priceOf(next) - priceOf(candidate)).toFixed(2));
-    }
-    if (last) {
-      candidate.savingsVsMostExpensive = Number(Math.max(0, priceOf(last) - priceOf(candidate)).toFixed(2));
-    }
+    const ownPrice = prices[index];
+    // "Next cheapest" means the cheapest other candidate that costs at least as much as this one,
+    // regardless of where it landed in the ranking order.
+    const nextCheapest = prices
+      .filter((price, otherIndex) => otherIndex !== index && price >= ownPrice)
+      .sort((left, right) => left - right)[0];
+
+    candidate.savingsVsNextCheapest = nextCheapest != null ? roundMoney(nextCheapest - ownPrice) : undefined;
+    candidate.savingsVsMostExpensive = roundMoney(Math.max(0, mostExpensive - ownPrice));
   });
+}
+
+function requestedQuantity(item: BasketItemRequest): number {
+  const quantity = item.quantity;
+  return typeof quantity === "number" && Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+}
+
+function roundMoney(value: number): number {
+  return Number(value.toFixed(2));
 }
 
 function deriveGlobalWarnings(recommended: RankedProduct | undefined, ranked: RankedProduct[], intent: ReturnType<typeof parseSearchIntent>): string[] {
@@ -189,9 +218,27 @@ async function searchRetailers(
   adapters: RetailerAdapter[],
   intent: ReturnType<typeof parseSearchIntent>,
   options: SearchOptions
-) {
+): Promise<AdapterSearchResult[]> {
   const config = await getProjectConfig();
-  return runWithConcurrency(adapters, config.resilience.maxConcurrentRetailerTasks, (adapter) => adapter.search(intent, options));
+  return runWithConcurrency(adapters, config.resilience.maxConcurrentRetailerTasks, async (adapter) => {
+    try {
+      return await adapter.search(intent, options);
+    } catch (error) {
+      // One adapter blowing up (browser launch failure, locked database) must not sink the whole comparison.
+      const message = error instanceof Error ? error.message : "Unknown adapter failure.";
+      return {
+        retailer: adapter.retailer,
+        products: [],
+        warnings: [`${adapter.retailer} could not be searched: ${message}`],
+        diagnostics: [`Adapter threw outside its scrape guard: ${message}`],
+        health: {
+          ...adapter.getHealth(),
+          status: "degraded",
+          recentFailure: message
+        }
+      };
+    }
+  });
 }
 
 async function runWithConcurrency<T, TResult>(

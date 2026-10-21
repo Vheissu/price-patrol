@@ -4,6 +4,7 @@ import { SearchIntent, SearchOptions, NormalizedProduct } from "../types/domain.
 import { clearAndType, humanDelay, navigateLikeUser, withBrowserPage } from "./shared/browser.js";
 import type { BrowserPage } from "./shared/browser.js";
 import { buildProductFromScrape } from "./shared/normalize.js";
+import { createNavigationFailure } from "./shared/resilience.js";
 import { normalizeText } from "../parsing/query.js";
 
 type WoolworthsResult = {
@@ -85,7 +86,9 @@ export class WoolworthsAdapter extends BaseRetailerAdapter {
       }
 
       if (!ready) {
-        throw new Error("Woolworths search state was not available in wowDataLayer.");
+        throw createNavigationFailure("Woolworths search did not reach a results page.", [
+          `Woolworths failure url: ${page.url()}`
+        ]);
       }
       await humanDelay();
 
@@ -179,7 +182,9 @@ export class WoolworthsAdapter extends BaseRetailerAdapter {
       });
 
       if (!rawCards.length) {
-        throw new Error("Woolworths search state was not available in wowDataLayer.");
+        throw createNavigationFailure("Woolworths results page loaded without any product data.", [
+          `Woolworths failure url: ${page.url()}`
+        ]);
       }
 
       return rawCards

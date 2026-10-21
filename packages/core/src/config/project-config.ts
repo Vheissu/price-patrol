@@ -55,7 +55,10 @@ const resilienceSchema = z.object({
   maxBackoffMs: z.number().int().positive().default(20_000),
   cooldownMs: z.number().int().positive().default(60_000),
   jitterMs: z.number().int().nonnegative().default(350),
-  maxConcurrentRetailerTasks: z.number().int().positive().default(1)
+  maxConcurrentRetailerTasks: z.number().int().positive().default(1),
+  attemptTimeoutMs: z.number().int().positive().default(120_000),
+  circuitBreakerFailureThreshold: z.number().int().positive().default(3),
+  circuitBreakerOpenMs: z.number().int().positive().default(5 * 60 * 1000)
 });
 
 const defaultLocationSchema = z.object({

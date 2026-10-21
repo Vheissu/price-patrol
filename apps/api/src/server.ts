@@ -3,6 +3,8 @@ import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
 import {
   AldiAdapter,
+  checkBrowserRuntime,
+  closeBrowsers,
   ColesAdapter,
   ComparisonMode,
   getCachedConfigPath,
@@ -41,6 +43,9 @@ import {
 const adapters = [new ColesAdapter(), new WoolworthsAdapter(), new AldiAdapter()];
 const service = new PricePatrolService(adapters);
 const projectConfig = await getProjectConfig();
+const browserRuntime = checkBrowserRuntime();
+const MAX_QUERY_LENGTH = 200;
+const MAX_BASKET_ITEMS = 60;
 
 const locationSchema = z
   .object({
@@ -53,21 +58,24 @@ const locationSchema = z
   .optional();
 
 const compareItemSchema = z.object({
-  query: z.string().min(1),
+  query: z.string().trim().min(1).max(MAX_QUERY_LENGTH),
   comparisonMode: z.enum(["exact", "equivalent", "best-value"]).default("equivalent"),
   location: locationSchema,
   allowLiveScrape: z.boolean().optional()
 });
 
 const basketSchema = z.object({
-  items: z.array(z.object({ name: z.string().min(1), quantity: z.number().positive().optional() })).min(1),
+  items: z
+    .array(z.object({ name: z.string().trim().min(1).max(MAX_QUERY_LENGTH), quantity: z.number().positive().max(999).optional() }))
+    .min(1)
+    .max(MAX_BASKET_ITEMS),
   comparisonMode: z.enum(["exact", "equivalent", "best-value"]).default("equivalent"),
   location: locationSchema,
   allowLiveScrape: z.boolean().optional()
 });
 
 const explainSchema = z.object({
-  query: z.string().min(1),
+  query: z.string().trim().min(1).max(MAX_QUERY_LENGTH),
   productId: z.string().min(1),
   comparisonMode: z.enum(["exact", "equivalent", "best-value"]).default("equivalent"),
   location: locationSchema,
@@ -158,9 +166,33 @@ const dealsQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).optional()
 });
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: true,
+  bodyLimit: 256 * 1024,
+  // Comparisons are browser-driven and can legitimately run for minutes; never cut a live scrape off mid-flight.
+  requestTimeout: 0,
+  keepAliveTimeout: 75_000
+});
 await app.register(cors, { origin: true });
 await app.register(sensible);
+
+app.setErrorHandler((error: unknown, request, reply) => {
+  const failure = error instanceof Error ? error : new Error(String(error));
+  const declaredStatus = (failure as { statusCode?: unknown }).statusCode;
+  const statusCode = typeof declaredStatus === "number" && declaredStatus >= 400 ? declaredStatus : 500;
+  if (statusCode >= 500) {
+    request.log.error({ err: failure, url: request.url }, "Unhandled request failure");
+  }
+  reply.status(statusCode).send({
+    message: statusCode >= 500 ? "The request failed unexpectedly. Check the API log for details." : failure.message
+  });
+});
+
+if (!browserRuntime.ok) {
+  for (const problem of browserRuntime.problems) {
+    app.log.warn(problem);
+  }
+}
 
 app.get("/api/health", async () => ({
   status: "ok",
@@ -172,7 +204,8 @@ app.get("/api/health", async () => ({
     browser: {
       headless: projectConfig.browser.headless,
       reuseSessions: projectConfig.browser.reuseSessions,
-      maskAutomation: projectConfig.browser.maskAutomation
+      maskAutomation: projectConfig.browser.maskAutomation,
+      runtime: browserRuntime
     },
     cache: {
       ttlMs: projectConfig.cache.ttlMs,
@@ -207,7 +240,7 @@ app.post("/api/compare/item", async (request, reply) => {
     allowLiveScrape: body.allowLiveScrape,
     preferredProductIds
   });
-  await recordItemComparison(result);
+  await persistQuietly(request.log, "item comparison", () => recordItemComparison(result));
   const enriched = await enrichItemComparison(result);
   return cacheImagesForItemComparison(enriched);
 });
@@ -231,7 +264,7 @@ app.post("/api/compare/basket", async (request, reply) => {
     allowLiveScrape: body.allowLiveScrape,
     preferredProductIds
   });
-  await recordBasketComparison(result);
+  await persistQuietly(request.log, "basket comparison", () => recordBasketComparison(result));
   const enriched = await enrichBasketComparison(result);
   return cacheImagesForBasketComparison(enriched);
 });
@@ -391,8 +424,46 @@ app.get("/api/assets/product-images/:cacheKey", async (request, reply) => {
 });
 
 const requestedPort = Number(process.env.PORT ?? 8787);
-const listeningPort = await listenWithPortFallback(app, Number.isFinite(requestedPort) ? requestedPort : 8787);
+const listeningHost = process.env.HOST ?? "0.0.0.0";
+const listeningPort = await listenWithPortFallback(app, Number.isFinite(requestedPort) ? requestedPort : 8787, listeningHost);
 app.log.info(`API listening on http://127.0.0.1:${listeningPort}`);
+registerShutdownHandlers();
+
+async function persistQuietly(log: typeof app.log, label: string, write: () => Promise<void>): Promise<void> {
+  try {
+    await write();
+  } catch (error) {
+    // A locked or failing SQLite write must not turn a successful comparison into a 500.
+    log.warn({ err: error }, `Failed to record ${label}; response will still be returned.`);
+  }
+}
+
+function registerShutdownHandlers(): void {
+  let shuttingDown = false;
+  const shutdown = async (signal: NodeJS.Signals) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    app.log.info(`Received ${signal}, shutting down.`);
+
+    const forceExit = setTimeout(() => {
+      app.log.warn("Shutdown took too long; exiting forcefully.");
+      process.exit(1);
+    }, 10_000);
+    forceExit.unref();
+
+    await app.close().catch((error: unknown) => app.log.warn({ err: error }, "HTTP server did not close cleanly."));
+    await closeBrowsers().catch(() => undefined);
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  };
+
+  process.once("SIGINT", () => void shutdown("SIGINT"));
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("unhandledRejection", (reason) => {
+    app.log.error({ err: reason }, "Unhandled promise rejection");
+  });
+}
 
 function resolveLocation(location?: LocationContext): LocationContext | undefined {
   const merged = {
@@ -406,11 +477,11 @@ function resolveLocation(location?: LocationContext): LocationContext | undefine
   return Object.values(merged).some((value) => value != null && value !== "") ? merged : undefined;
 }
 
-async function listenWithPortFallback(server: typeof app, preferredPort: number): Promise<number> {
+async function listenWithPortFallback(server: typeof app, preferredPort: number, host: string): Promise<number> {
   let port = preferredPort;
   while (port <= 65_535) {
     try {
-      await server.listen({ port, host: "0.0.0.0" });
+      await server.listen({ port, host });
       return port;
     } catch (error) {
       if (!isAddressInUse(error)) {

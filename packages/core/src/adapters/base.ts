@@ -3,9 +3,9 @@ import { getProjectConfig, getRetailerConfig } from "../config/project-config.js
 import { normalizeText } from "../parsing/query.js";
 import { AdapterHealth, AdapterSearchResult, NormalizedProduct, RetailerId, SearchIntent, SearchOptions } from "../types/domain.js";
 import { getHistoricalFallbackProducts } from "./shared/historical-catalog.js";
-import { asScrapeFailure, runWithResilience } from "./shared/resilience.js";
+import { asScrapeFailure, getRetailerResilienceState, runWithResilience } from "./shared/resilience.js";
 
-const ADAPTER_CACHE_VERSION = "playwright-v3";
+const ADAPTER_CACHE_VERSION = "playwright-v4";
 
 export interface RetailerAdapter {
   readonly retailer: RetailerId;
@@ -16,6 +16,7 @@ export interface RetailerAdapter {
 export abstract class BaseRetailerAdapter implements RetailerAdapter {
   protected readonly cache = new SqliteCache();
   protected health: AdapterHealth;
+  private readonly inflightSearches = new Map<string, Promise<AdapterSearchResult>>();
 
   constructor(public readonly retailer: RetailerId) {
     this.health = {
@@ -27,13 +28,40 @@ export abstract class BaseRetailerAdapter implements RetailerAdapter {
   }
 
   async search(intent: SearchIntent, options: SearchOptions = {}): Promise<AdapterSearchResult> {
-    const projectConfig = await getProjectConfig();
-    const retailerConfig = await getRetailerConfig(this.retailer);
-    const cacheKey = `${ADAPTER_CACHE_VERSION}:${this.retailer}-${intent.normalizedQuery}-${options.location?.postcode ?? "default"}`;
-    const cached = await this.cache.get<AdapterSearchResult>(cacheKey);
+    const cacheKey = this.buildCacheKey(intent, options);
+    const cached = await this.cache.get<AdapterSearchResult>(cacheKey).catch(() => null);
     if (cached?.products.length) {
       return cached;
     }
+
+    // Coalesce identical concurrent searches so two callers (for example the Today and Compare pages)
+    // share one scrape instead of queueing two behind the per-retailer permit.
+    const inflight = this.inflightSearches.get(cacheKey);
+    if (inflight) {
+      return inflight;
+    }
+
+    const run = this.executeSearch(intent, options, cacheKey).finally(() => {
+      this.inflightSearches.delete(cacheKey);
+    });
+    this.inflightSearches.set(cacheKey, run);
+    return run;
+  }
+
+  protected buildCacheKey(intent: SearchIntent, options: SearchOptions): string {
+    return [
+      ADAPTER_CACHE_VERSION,
+      this.retailer,
+      intent.normalizedQuery,
+      options.location?.postcode ?? "default",
+      options.location?.storeId ?? "default",
+      options.maxResults ?? "default"
+    ].join(":");
+  }
+
+  private async executeSearch(intent: SearchIntent, options: SearchOptions, cacheKey: string): Promise<AdapterSearchResult> {
+    const projectConfig = await getProjectConfig();
+    const retailerConfig = await getRetailerConfig(this.retailer);
 
     const warnings: string[] = [];
     const diagnostics: string[] = [];
@@ -110,11 +138,13 @@ export abstract class BaseRetailerAdapter implements RetailerAdapter {
       products,
       warnings,
       diagnostics,
-      health: this.health
+      health: this.getHealth()
     };
 
     if (shouldCacheResult(result)) {
-      await this.cache.set(cacheKey, result, projectConfig.cache.ttlMs);
+      await this.cache.set(cacheKey, result, projectConfig.cache.ttlMs).catch((error: unknown) => {
+        diagnostics.push(`Cache write skipped: ${error instanceof Error ? error.message : String(error)}`);
+      });
     }
     return result;
   }
@@ -168,7 +198,14 @@ export abstract class BaseRetailerAdapter implements RetailerAdapter {
   }
 
   getHealth(): AdapterHealth {
-    return this.health;
+    const resilience = getRetailerResilienceState(this.retailer);
+    return {
+      ...this.health,
+      consecutiveFailures: resilience.consecutiveFailures,
+      circuitState: resilience.circuitState,
+      circuitOpenUntil: resilience.circuitOpenUntil,
+      cooldownUntil: resilience.cooldownUntil
+    };
   }
 
   protected searchFallbackCatalog(intent: SearchIntent, maxResults: number): Pick<AdapterSearchResult, "products" | "warnings" | "diagnostics"> {

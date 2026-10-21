@@ -2,7 +2,7 @@
 
 Private grocery price comparison for Australian supermarkets. The system searches retailer sites, normalizes product data into a shared model, compares equivalent items, and exposes the results through an HTTP API, an MCP server, a web UI, and a terminal setup flow.
 
-This project is scraping-first and browser-led. Puppeteer is used to behave like a normal browsing session, preserve cookies and store context, and fall back gracefully when a retailer site changes or pushes back.
+This project is scraping-first and browser-led. Playwright drives real browser sessions so the app behaves like a normal shopper, keeps cookies and store context between runs, and falls back gracefully when a retailer site changes or pushes back.
 
 ## Current status
 
@@ -22,8 +22,10 @@ This project is scraping-first and browser-led. Puppeteer is used to behave like
 - MCP server for assistant/tool use
 - Aurelia 2 web UI for manual browsing and shopping-list workflows
 - SQLite-backed request cache, price history, favorites, and watchlist storage
-- Cache, retries, backoff, cooldown, and per-retailer concurrency limits
-- Adapter health reporting and scrape diagnostics
+- Cache, retries, backoff, cooldown, per-attempt deadlines, and per-retailer concurrency limits
+- Circuit breaker that pauses live scraping for a retailer after repeated failures and serves saved data meanwhile
+- Identical concurrent searches share one scrape instead of queueing twice
+- Adapter health reporting (including circuit and cooldown state) and scrape diagnostics
 
 ## Repository layout
 
@@ -39,13 +41,17 @@ This project is scraping-first and browser-led. Puppeteer is used to behave like
 
 - Node.js 22+
 - npm 10+
-- A Chromium-capable local environment for Puppeteer
+- Playwright's Chromium build (used for ALDI)
+- Google Chrome installed in its default location (Coles and Woolworths are driven through the Chrome channel because they are challenge-sensitive)
 
 ## Installation
 
 ```bash
 npm install
+npx playwright install chromium
 ```
+
+`GET /api/health` reports `config.browser.runtime` so you can confirm both browsers were found. The API also logs a warning at startup if either is missing.
 
 ## Quick start
 
@@ -73,7 +79,7 @@ This starts:
 - Web UI via Vite
 - MCP server over stdio
 
-If port `8787` is already in use, start the API with a different `PORT` value.
+If port `8787` is already in use, start the API with a different `PORT` value. The API binds to `0.0.0.0` so other devices on your network can reach it; set `HOST=127.0.0.1` to keep it local.
 
 ## Root config
 
@@ -81,9 +87,9 @@ The app reads [price-patrol.toml](/Users/dwayne/Code/price-patrol/price-patrol.t
 
 Main sections:
 
-- `[browser]` Puppeteer identity, timeouts, viewport, headers, delays, session reuse, and user data directory
+- `[browser]` browser identity, timeouts, viewport, headers, delays, session reuse, and the user data directory where per-retailer session state (cookies, store selection) is persisted between restarts
 - `[cache]` cache TTL, live-scrape enablement, and historical fallback policy
-- `[resilience]` retry attempts, exponential backoff, jitter, cooldown after throttling/challenge, and per-retailer concurrency
+- `[resilience]` retry attempts, exponential backoff, jitter, cooldown after throttling/challenge, per-retailer concurrency, the per-attempt deadline (`attemptTimeoutMs`), and the circuit breaker (`circuitBreakerFailureThreshold`, `circuitBreakerOpenMs`)
 - `[defaultLocation]` fallback postcode and suburb used when a request omits location
 - `[retailers.<name>]` enable/disable, live scrape toggle, and per-retailer result limit
 
@@ -195,14 +201,15 @@ The scraping path is designed around realistic browser sessions rather than raw 
 
 Current behavior:
 
-- shared Puppeteer browser instance
+- one shared Playwright browser per retailer
 - reusable browser contexts per retailer and location
-- cookie and consent persistence through the browser profile
+- cookie and store-selection persistence via Playwright storage state saved under `[browser].userDataDir`, so Coles does not need to re-select a store after every restart
 - configurable delays and headers
 - challenge and rate-limit detection
-- retry with exponential backoff and jitter
+- retry with exponential backoff and jitter, bounded by a per-attempt deadline
 - cooldown after throttling or challenge behavior
-- per-retailer concurrency limiting
+- circuit breaker: after `circuitBreakerFailureThreshold` consecutive failed searches the retailer is skipped for `circuitBreakerOpenMs`, then a single probe is allowed through
+- per-retailer concurrency limiting and coalescing of identical in-flight searches
 - observation capture into SQLite for historical price context
 - fallback to the historical SQLite catalog when live extraction fails and fallback is enabled
 
@@ -211,8 +218,9 @@ Current behavior:
 Implemented checks currently cover the shared core package:
 
 - config parsing defaults
-- resilience helper behavior
-- comparison service behavior
+- resilience helper behavior, circuit breaker, and attempt deadlines
+- in-flight search coalescing and cache reuse in the base adapter
+- comparison service behavior, basket quantities, and savings maths
 - current Coles, Woolworths, and ALDI parser shapes
 
 Run them with:

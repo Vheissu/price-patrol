@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type Route } from "playwright";
-import { getProjectConfig, type ProjectConfig } from "../../config/project-config.js";
+import { getProjectConfig, resolveProjectPath, type ProjectConfig } from "../../config/project-config.js";
 import { type LocationContext, type RetailerId } from "../../types/domain.js";
 import { createChallengeFailure, createNavigationFailure, createRateLimitFailure, parseRetryAfter } from "./resilience.js";
 
@@ -16,6 +19,8 @@ export type BrowserLaunchProfile = {
   headless: boolean;
   channel?: "chrome";
 };
+
+const SESSION_STATE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const browserPromises = new Map<string, Promise<Browser>>();
 const contextPromises = new Map<string, Promise<BrowserContext>>();
@@ -36,7 +41,11 @@ export async function withBrowserPage<T>(options: BrowserPageOptions, callback: 
   applyBrowserDefaults(page, config.browser);
 
   try {
-    return await callback(page);
+    const result = await callback(page);
+    if (shouldReuseContext) {
+      await persistSessionState(context, options, config.browser);
+    }
+    return result;
   } finally {
     if (!shouldReusePage) {
       await page.close().catch(() => undefined);
@@ -44,6 +53,39 @@ export async function withBrowserPage<T>(options: BrowserPageOptions, callback: 
     if (!shouldReuseContext) {
       await context.close().catch(() => undefined);
     }
+  }
+}
+
+export function resolveSessionStatePath(options: BrowserPageOptions, browserConfig: BrowserConfig): string {
+  const key = contextKey(options.retailer, options.location);
+  const digest = createHash("sha1").update(key).digest("hex").slice(0, 12);
+  return join(resolveProjectPath(browserConfig.userDataDir), "sessions", `${options.retailer}-${digest}.json`);
+}
+
+function resolveReusableSessionState(options: BrowserPageOptions, browserConfig: BrowserConfig): string | undefined {
+  if (!browserConfig.reuseSessions) {
+    return undefined;
+  }
+
+  const statePath = resolveSessionStatePath(options, browserConfig);
+  try {
+    if (!existsSync(statePath)) {
+      return undefined;
+    }
+    const age = Date.now() - statSync(statePath).mtimeMs;
+    return age <= SESSION_STATE_MAX_AGE_MS ? statePath : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function persistSessionState(context: BrowserContext, options: BrowserPageOptions, browserConfig: BrowserConfig): Promise<void> {
+  const statePath = resolveSessionStatePath(options, browserConfig);
+  try {
+    mkdirSync(dirname(statePath), { recursive: true });
+    await context.storageState({ path: statePath });
+  } catch {
+    // Session persistence is best effort; a failed write only costs a re-prime on the next restart.
   }
 }
 
@@ -181,7 +223,12 @@ async function launchBrowser(options: BrowserPageOptions, browserConfig: Browser
     channel: launchProfile.channel,
     headless: launchProfile.headless,
     ignoreDefaultArgs,
-    timeout: browserConfig.protocolTimeoutMs
+    timeout: browserConfig.protocolTimeoutMs,
+    // The host process owns shutdown ordering (close the HTTP server, then browsers).
+    // Playwright's default handlers would call process.exit() mid-shutdown.
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false
   });
 
   attachBrowserLifecycle(browser, key);
@@ -218,7 +265,11 @@ async function getRetailerContext(browser: Browser, options: BrowserPageOptions,
 }
 
 async function createBrowserContext(browser: Browser, options: BrowserPageOptions, browserConfig: BrowserConfig): Promise<BrowserContext> {
-  const context = await browser.newContext(buildBrowserContextOptions(browserConfig));
+  const contextOptions = buildBrowserContextOptions(browserConfig);
+  const storageState = resolveReusableSessionState(options, browserConfig);
+  const context = storageState
+    ? await browser.newContext({ ...contextOptions, storageState }).catch(() => browser.newContext(contextOptions))
+    : await browser.newContext(contextOptions);
   await configureBrowserContext(context, options, browserConfig);
   return context;
 }
@@ -276,8 +327,7 @@ function browserKey(options: BrowserPageOptions): string {
 function attachBrowserLifecycle(browser: Browser, key: string): void {
   browser.on("disconnected", () => {
     browserPromises.delete(key);
-    contextPromises.clear();
-    pagePromises.clear();
+    forgetRetailerSessions(key);
   });
 
   if (cleanupRegistered) {
@@ -285,21 +335,35 @@ function attachBrowserLifecycle(browser: Browser, key: string): void {
   }
 
   cleanupRegistered = true;
-  const dispose = () => {
+  process.once("beforeExit", () => {
     void closeBrowsers();
-  };
-
-  process.once("beforeExit", dispose);
-  process.once("SIGINT", dispose);
-  process.once("SIGTERM", dispose);
+  });
 }
 
-async function closeBrowsers(): Promise<void> {
+function forgetRetailerSessions(retailerKey: string): void {
+  const prefix = `${retailerKey}:`;
+  for (const contextName of Array.from(contextPromises.keys())) {
+    if (contextName.startsWith(prefix)) {
+      contextPromises.delete(contextName);
+    }
+  }
+  for (const pageName of Array.from(pagePromises.keys())) {
+    if (pageName.startsWith(prefix)) {
+      pagePromises.delete(pageName);
+    }
+  }
+}
+
+export async function closeBrowsers(): Promise<void> {
   const activeBrowsers = await Promise.all(Array.from(browserPromises.values()).map((promise) => promise.catch(() => undefined)));
   browserPromises.clear();
   contextPromises.clear();
   pagePromises.clear();
   await Promise.all(activeBrowsers.map((browser) => browser?.close().catch(() => undefined)));
+}
+
+export function getOpenBrowserCount(): number {
+  return browserPromises.size;
 }
 
 async function assertHealthyNavigation(page: Page, statusCode?: number, retryAfterHeader?: string): Promise<void> {
